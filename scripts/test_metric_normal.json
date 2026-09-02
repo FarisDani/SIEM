@@ -1,0 +1,1 @@
+{"integration":"system-metrics","host":"DATABASE-SERVER","os":"windows","cpu_pct":25.0,"ram_used_mb":6120,"ram_total_mb":16209,"ram_pct":37.7,"disk_used_gb":100.0,"disk_total_gb":215.0,"disk_pct":46.5,"uptime_hours":19.4,"top_process":"chrome (1234)"}

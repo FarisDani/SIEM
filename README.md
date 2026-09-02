@@ -1,7 +1,9 @@
-# Panduan Lengkap Automasi Monitoring OS dengan Wazuh SIEM
+# Panduan Lengkap Automasi Monitoring OS & Server Health dengan Wazuh SIEM
 **RS Indriati Boyolali — IT Infrastructure & Security**
 
-Dokumen ini berisi panduan langkah demi langkah (Step-by-Step) instalasi, konfigurasi, dan pengoperasian **Wazuh SIEM** untuk monitoring sistem operasi (OS Monitoring) target **Ubuntu 22 VM** dari host **Windows 11**.
+> 🚀 **Panduan Praktis Siap Pakai (Plug & Play)**:  
+> Untuk operasional harian, prosedur shutdown/restart, dan cara membuka dashboard dalam 3 langkah mudah, silakan baca:  
+> 👉 [**`docs/PANDUAN_RINGKAS_PLUG_AND_PLAY.md`**](file:///d:/Faris/Github/SEIM/docs/PANDUAN_RINGKAS_PLUG_AND_PLAY.md)
 
 ---
 

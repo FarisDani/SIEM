@@ -26,9 +26,10 @@ cd /d "D:\Faris\Github\SEIM\wazuh-docker\single-node"
 docker compose up -d
 
 echo.
-echo [3/4] Memeriksa Status Wazuh Agent Windows...
+echo [3/4] Memeriksa Status Wazuh Agent Windows & Menjalankan Telemetry Streamer...
 powershell -Command "Get-Service -Name 'WazuhSvc','Wazuh' -ErrorAction SilentlyContinue | Format-Table -AutoSize"
 powershell -Command "Start-Service -Name 'WazuhSvc' -ErrorAction SilentlyContinue"
+start "" /min "%~dp0start_monitoring_stream.bat"
 
 echo.
 echo [4/4] Ringkasan Status Container:

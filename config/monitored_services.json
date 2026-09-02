@@ -1,0 +1,22 @@
+{
+  "windows": [
+    "WazuhSvc",
+    "com.docker.service",
+    "MSSQLSERVER",
+    "MySQL",
+    "postgresql-x64-15",
+    "postgresql-x64-16",
+    "W3SVC"
+  ],
+  "linux": [
+    "wazuh-agent",
+    "docker",
+    "ssh",
+    "sshd",
+    "nginx",
+    "apache2",
+    "mysql",
+    "mariadb",
+    "postgresql"
+  ]
+}

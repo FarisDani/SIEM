@@ -1,0 +1,63 @@
+<!--
+  Enterprise Proactive Prevention Rules for Server Health & Services
+  RS Indriati Boyolali - IT Infrastructure & Security
+-->
+<group name="system_metrics,performance,">
+
+  <!-- Rule 100100: Base metric collector event from pure JSON stream (Level 3) -->
+  <rule id="100100" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="integration">^system-metrics$</field>
+    <description>System telemetry from $(host) ($(os_type)) - CPU: $(cpu_pct)%, RAM: $(ram_pct)%, Worst Disk: $(worst_disk_drive) ($(worst_disk_pct)%)</description>
+    <group>system_health,telemetry,</group>
+  </rule>
+
+  <!-- Rule 100104: Base metric collector event from Wodle Command (Level 3) -->
+  <rule id="100104" level="3">
+    <decoded_as>ossec</decoded_as>
+    <match>system-performance</match>
+    <description>System telemetry from $(host) ($(os_type)) - CPU: $(cpu_pct)%, RAM: $(ram_pct)%, Worst Disk: $(worst_disk_drive) ($(worst_disk_pct)%)</description>
+    <group>system_health,telemetry,</group>
+  </rule>
+
+  <!-- Rule 100105: CRITICAL - Monitored Core Service STOPPED / DOWN (Level 12) -->
+  <rule id="100105" level="12">
+    <if_sid>100100,100104</if_sid>
+    <field name="services_down_count" type="pcre2">^[1-9][0-9]*$</field>
+    <description>CRITICAL SERVICE DOWN on $(host) - Stopped Services: $(services_down_names)</description>
+    <group>service_down,system_critical,</group>
+  </rule>
+
+  <!-- Rule 100103: Critical Disk Space Exhaustion on Any Drive (> 90% full) -->
+  <rule id="100103" level="10">
+    <if_sid>100100,100104</if_sid>
+    <field name="worst_disk_pct" type="pcre2">^(9[0-9](\.[0-9]+)?|100(\.0+)?)</field>
+    <description>CRITICAL DISK FULL on $(host) - Drive $(worst_disk_drive) is $(worst_disk_pct)% full ($(disks_summary))</description>
+    <group>disk_critical,system_warning,</group>
+  </rule>
+
+  <!-- Rule 100106: Warning - Swap / Virtual Memory (Pagefile) Overload (> 85%) -->
+  <rule id="100106" level="9">
+    <if_sid>100100,100104</if_sid>
+    <field name="pagefile_pct" type="pcre2">^(8[5-9](\.[0-9]+)?|9[0-9](\.[0-9]+)?|100(\.0+)?)</field>
+    <description>WARNING: High Virtual Memory / Swap Overload on $(host) - Pagefile/Swap: $(pagefile_pct)%</description>
+    <group>swap_warning,system_warning,</group>
+  </rule>
+
+  <!-- Rule 100101: High CPU Usage Alert (> 85%) -->
+  <rule id="100101" level="7">
+    <if_sid>100100,100104</if_sid>
+    <field name="cpu_pct" type="pcre2">^(8[5-9](\.[0-9]+)?|9[0-9](\.[0-9]+)?|100(\.0+)?)</field>
+    <description>High CPU Usage Alert on $(host) - CPU Load: $(cpu_pct)% (Top Process: $(top_process))</description>
+    <group>high_cpu,system_warning,</group>
+  </rule>
+
+  <!-- Rule 100102: High Memory / RAM Usage Alert (> 90%) -->
+  <rule id="100102" level="8">
+    <if_sid>100100,100104</if_sid>
+    <field name="ram_pct" type="pcre2">^(9[0-9](\.[0-9]+)?|100(\.0+)?)</field>
+    <description>High RAM Usage Alert on $(host) - RAM Used: $(ram_pct)% ($(ram_used_mb) MB / $(ram_total_mb) MB)</description>
+    <group>high_ram,system_warning,</group>
+  </rule>
+
+</group>

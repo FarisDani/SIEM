@@ -1,0 +1,17 @@
+<!--
+  Custom Decoder for Enterprise System Metrics & Prevention Telemetry
+  RS Indriati Boyolali - IT Infrastructure & Security
+-->
+
+<!-- 1. Pure JSON Decoder -->
+<decoder name="system-metrics-raw">
+  <prematch>{"integration":"system-metrics"</prematch>
+  <plugin_decoder>JSON_Decoder</plugin_decoder>
+</decoder>
+
+<!-- 2. Wodle Command Output Decoder -->
+<decoder name="system-metrics-wodle">
+  <parent>ossec</parent>
+  <prematch offset="after_parent">output: 'system-performance':</prematch>
+  <plugin_decoder>JSON_Decoder</plugin_decoder>
+</decoder>
