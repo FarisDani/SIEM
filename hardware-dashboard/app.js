@@ -16,6 +16,82 @@ let registeredNodes = [];
 let alertLogs = [];
 const maxLogCount = 100;
 
+// SSH Failure & Troubleshooting Diagnostics State
+let consecutiveDisconnectCycles = 0;
+let lastAutoOpenedNodeId = null;
+
+// Generic Clipboard Copy Helper with Visual Feedback
+async function copyToClipboard(text, btnElement = null, successText = '✓ Tersalin!') {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+
+    if (btnElement) {
+      const origHtml = btnElement.innerHTML;
+      btnElement.innerHTML = successText;
+      btnElement.classList.add('bg-emerald-500/30', 'text-emerald-300', 'border-emerald-400');
+      setTimeout(() => {
+        btnElement.innerHTML = origHtml;
+        btnElement.classList.remove('bg-emerald-500/30', 'text-emerald-300', 'border-emerald-400');
+      }, 1600);
+    }
+    return true;
+  } catch (err) {
+    console.error('Gagal menyalin teks ke clipboard:', err);
+    return false;
+  }
+}
+
+// SSH Connection Error & Troubleshooting Modal Controller
+function openSshTroubleshootModal(nodeId = null) {
+  const modal = document.getElementById('ssh-troubleshoot-modal');
+  if (!modal) return;
+
+  const targetNode = registeredNodes.find(n => n.id === (nodeId || activeNodeId)) || {
+    name: hardwareState.nodeName || 'Target Device',
+    host: hardwareState.sshConfig ? hardwareState.sshConfig.targetHost : '192.168.27.203',
+    port: hardwareState.sshConfig ? hardwareState.sshConfig.targetPort : 22,
+    user: hardwareState.sshConfig ? hardwareState.sshConfig.targetUser : 'admin'
+  };
+
+  const badge = document.getElementById('troubleshoot-node-badge');
+  const info = document.getElementById('troubleshoot-node-info');
+  const timeElem = document.getElementById('troubleshoot-timestamp');
+  const msgElem = document.getElementById('troubleshoot-error-message');
+  const pshCodeElem = document.getElementById('powershell-fix-code');
+
+  const sshCfg = hardwareState.sshConfig || {};
+  const errType = sshCfg.errorType && sshCfg.errorType !== 'NONE' ? sshCfg.errorType : (targetNode.errorType && targetNode.errorType !== 'NONE' ? targetNode.errorType : 'TIMEOUT');
+  const errMsg = sshCfg.lastError || targetNode.lastError || `Koneksi SSH Timeout: Komputer target ${targetNode.host}:${targetNode.port} tidak merespons (Port ${targetNode.port || 22} mungkin belum terbuka atau komputer target offline).`;
+  const errTime = sshCfg.errorTimestamp || new Date().toLocaleTimeString();
+
+  if (badge) badge.innerText = errType;
+  if (info) info.innerText = `Target: ${targetNode.name} (${targetNode.host}:${targetNode.port || 22}) • User: ${targetNode.user || 'system'}`;
+  if (timeElem) timeElem.innerText = errTime;
+  if (msgElem) msgElem.innerText = errMsg;
+
+  if (pshCodeElem) {
+    pshCodeElem.innerText = `$p="$env:windir\\System32\\OpenSSH\\sshd.exe"; if (-not (Test-Path $p)) { $p="$env:ProgramFiles\\OpenSSH\\sshd.exe" }; if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { & sc.exe create sshd binPath= "\`"$p\`"" start= auto DisplayName= "OpenSSH SSH Server" }; & "$env:windir\\System32\\OpenSSH\\ssh-keygen.exe" -A; Set-Service sshd -StartupType Automatic; Start-Service sshd; netsh advfirewall firewall add rule name="OpenSSH-Server-In-TCP-${targetNode.port || 22}" dir=in action=allow protocol=TCP localport=${targetNode.port || 22} profile=any; Write-Host "SSH PORT ${targetNode.port || 22} AKTIF!" -ForegroundColor Green`;
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function closeSshTroubleshootModal() {
+  const modal = document.getElementById('ssh-troubleshoot-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
 // Hardware State Snapshot
 let hardwareState = {
   nodeId: 'node_laptop_acer',
@@ -280,7 +356,7 @@ function renderAlertsTable() {
   if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="5" class="py-8 text-center text-slate-500 font-sans">
+        <td colspan="6" class="py-8 text-center text-slate-500 font-sans">
           Tidak ada insiden hardware dengan filter ${activeAlertFilter}.
         </td>
       </tr>
@@ -293,6 +369,8 @@ function renderAlertsTable() {
     if (item.severity === 'CRITICAL') badgeClass = 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse';
     if (item.severity === 'WARNING') badgeClass = 'bg-amber-500/20 text-amber-400 border-amber-500/40';
     if (item.severity === 'INFO') badgeClass = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
+
+    const copyPayload = `[${item.timestamp}] [${item.severity}] [${item.component}] ${item.message} | Rekomendasi: ${item.action}`;
 
     return `
       <tr class="hover:bg-slate-800/40 transition">
@@ -311,9 +389,24 @@ function renderAlertsTable() {
             data-tooltip-title="Rekomendasi Tindakan NOC"
             data-tooltip-category="MITIGATION"
             data-tooltip="${escapeHtml(item.action)}">${item.action}</td>
+        <td class="py-2.5 px-3 text-right">
+          <button class="copy-alert-row-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-800/80 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 border border-slate-700/50 hover:border-cyan-500/30 transition flex items-center gap-1 ml-auto"
+                  data-log="${escapeHtml(copyPayload)}" title="Salin rincian alarm ini">
+            <span>📋 Salin</span>
+          </button>
+        </td>
       </tr>
     `;
   }).join('');
+
+  // Attach Row Copy Listeners
+  tbody.querySelectorAll('.copy-alert-row-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = btn.getAttribute('data-log') || '';
+      copyToClipboard(text, btn, '✓ Tersalin!');
+    });
+  });
 }
 
 // Render Tab 2: Windows OS Event Logs Table
@@ -351,7 +444,7 @@ function renderOsEventsTable() {
   if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="py-8 text-center text-slate-500 font-sans">
+        <td colspan="7" class="py-8 text-center text-slate-500 font-sans">
           Tidak ada event Windows dengan filter ${activeEventFilter}.
         </td>
       </tr>
@@ -367,6 +460,8 @@ function renderOsEventsTable() {
     let logBadge = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
     if (item.logName === 'Security') logBadge = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
     if (item.logName === 'Application') logBadge = 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+
+    const copyPayload = `[${item.time}] [${item.level || 'Info'}] [${item.logName}] [Event ID: ${item.eventId || '—'}] ${item.source}: ${item.message}`;
 
     return `
       <tr class="hover:bg-slate-800/40 transition">
@@ -390,9 +485,24 @@ function renderOsEventsTable() {
             data-tooltip-title="Windows Event ID #${item.eventId || '—'}"
             data-tooltip-category="${item.logName || 'WINDOWS'} (${item.level || 'Info'})"
             data-tooltip="${escapeHtml(item.message)}">${item.message}</td>
+        <td class="py-2.5 px-3 text-right">
+          <button class="copy-event-row-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-800/80 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 border border-slate-700/50 hover:border-cyan-500/30 transition flex items-center gap-1 ml-auto"
+                  data-log="${escapeHtml(copyPayload)}" title="Salin rincian event Windows ini">
+            <span>📋 Salin</span>
+          </button>
+        </td>
       </tr>
     `;
   }).join('');
+
+  // Attach Row Copy Listeners
+  tbody.querySelectorAll('.copy-event-row-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = btn.getAttribute('data-log') || '';
+      copyToClipboard(text, btn, '✓ Tersalin!');
+    });
+  });
 }
 
 // Render Top Multi-Device Tabs Bar
@@ -725,16 +835,27 @@ function updateUI() {
   if (connBadge && connText && sshConfig) {
     if (sourceMode === 'SSH_REMOTE') {
       if (sshConfig.connected) {
+        consecutiveDisconnectCycles = 0;
+        lastAutoOpenedNodeId = null;
         connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-2 shadow';
         connText.innerText = `SSH CONNECTED (${sshConfig.latencyMs || 0} ms)`;
         connBadge.setAttribute('data-tooltip', `Status SSH: Terhubung ke ${sshConfig.targetHost}:${sshConfig.targetPort} (${sshConfig.latencyMs || 0} ms)`);
       } else {
-        connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-2 animate-pulse shadow';
+        consecutiveDisconnectCycles++;
+        connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 flex items-center gap-2 animate-pulse shadow cursor-pointer transition';
         const errDetail = sshConfig.lastError ? ` - ${sshConfig.lastError}` : '';
-        connText.innerText = `RECONNECTING (${sshConfig.targetHost})...`;
-        connBadge.setAttribute('data-tooltip', `Status SSH: Menghubungkan ulang ke ${sshConfig.targetHost}:${sshConfig.targetPort}${errDetail}`);
+        connText.innerText = `🔴 TIMEOUT / RECONNECTING (${sshConfig.targetHost})`;
+        connBadge.setAttribute('data-tooltip', `Klik di sini untuk Diagnostik Error & Panduan Perbaikan SSH (${sshConfig.targetHost}:${sshConfig.targetPort}${errDetail})`);
+
+        // Auto trigger troubleshooting modal on 3rd failure if not opened yet for this node
+        if (consecutiveDisconnectCycles >= 3 && lastAutoOpenedNodeId !== activeNodeId) {
+          lastAutoOpenedNodeId = activeNodeId;
+          openSshTroubleshootModal(activeNodeId);
+        }
       }
     } else {
+      consecutiveDisconnectCycles = 0;
+      lastAutoOpenedNodeId = null;
       connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center gap-2 shadow';
       connText.innerText = 'LOCAL HOST ACTIVE';
       connBadge.setAttribute('data-tooltip', 'Status: Monitoring Local Host (WMI Direct)');
@@ -1163,6 +1284,102 @@ document.addEventListener('DOMContentLoaded', () => {
       renderOsEventsTable();
     });
   });
+
+  // Copy All Alerts Log Button
+  const copyAllAlertsBtn = document.getElementById('copy-all-alerts-btn');
+  if (copyAllAlertsBtn) {
+    copyAllAlertsBtn.addEventListener('click', () => {
+      if (alertLogs.length === 0) {
+        copyToClipboard('Tidak ada log anomali hardware.', copyAllAlertsBtn, 'Log Kosong');
+        return;
+      }
+      const dump = alertLogs.map(a => `[${a.timestamp}] [${a.severity}] [${a.component}] ${a.message} | Rekomendasi: ${a.action}`).join('\n');
+      copyToClipboard(`=== HARDWARE ANOMALY ALERTS LOG (${new Date().toLocaleString()}) ===\n` + dump, copyAllAlertsBtn, '✓ Semua Tersalin!');
+    });
+  }
+
+  // Copy All Windows Events Log Button
+  const copyAllEventsBtn = document.getElementById('copy-all-events-btn');
+  if (copyAllEventsBtn) {
+    copyAllEventsBtn.addEventListener('click', () => {
+      const logs = hardwareState.osEventLogs || [];
+      if (logs.length === 0) {
+        copyToClipboard('Tidak ada event Windows yang tercatat.', copyAllEventsBtn, 'Log Kosong');
+        return;
+      }
+      const dump = logs.map(e => `[${e.time}] [${e.level || 'Info'}] [${e.logName}] [Event ID: ${e.eventId || '—'}] ${e.source}: ${e.message}`).join('\n');
+      copyToClipboard(`=== WINDOWS OS EVENT & AUDIT LOGS (${new Date().toLocaleString()}) ===\n` + dump, copyAllEventsBtn, '✓ Semua Tersalin!');
+    });
+  }
+
+  // Connection Badge Click -> Open Troubleshooting Modal if Disconnected
+  const connBadgeEl = document.getElementById('connection-badge');
+  if (connBadgeEl) {
+    connBadgeEl.addEventListener('click', () => {
+      const isSsh = hardwareState.sourceMode === 'SSH_REMOTE';
+      const isConn = hardwareState.sshConfig && hardwareState.sshConfig.connected;
+      if (isSsh && !isConn) {
+        openSshTroubleshootModal(activeNodeId);
+      }
+    });
+  }
+
+  // SSH Troubleshoot Modal Controls
+  const closeTroubleshootBtn = document.getElementById('close-troubleshoot-modal-btn');
+  const dismissTroubleshootBtn = document.getElementById('troubleshoot-dismiss-btn');
+  const retryTroubleshootBtn = document.getElementById('troubleshoot-retry-btn');
+  const editVaultTroubleshootBtn = document.getElementById('troubleshoot-edit-vault-btn');
+  const copyTroubleshootLogBtn = document.getElementById('copy-troubleshoot-log-btn');
+  const copyPshFixBtn = document.getElementById('copy-powershell-fix-btn');
+
+  if (closeTroubleshootBtn) closeTroubleshootBtn.addEventListener('click', closeSshTroubleshootModal);
+  if (dismissTroubleshootBtn) dismissTroubleshootBtn.addEventListener('click', closeSshTroubleshootModal);
+
+  if (retryTroubleshootBtn) {
+    retryTroubleshootBtn.addEventListener('click', async () => {
+      const origText = retryTroubleshootBtn.innerHTML;
+      retryTroubleshootBtn.innerHTML = '<span>⏳ Menghubungkan...</span>';
+      await updateMetrics();
+      await fetchNodes();
+      setTimeout(() => {
+        retryTroubleshootBtn.innerHTML = origText;
+        if (hardwareState.sshConfig && hardwareState.sshConfig.connected) {
+          closeSshTroubleshootModal();
+        } else {
+          openSshTroubleshootModal(activeNodeId);
+        }
+      }, 1000);
+    });
+  }
+
+  if (editVaultTroubleshootBtn) {
+    editVaultTroubleshootBtn.addEventListener('click', () => {
+      closeSshTroubleshootModal();
+      openProfileModal(activeNodeId);
+    });
+  }
+
+  if (copyTroubleshootLogBtn) {
+    copyTroubleshootLogBtn.addEventListener('click', () => {
+      const targetNode = registeredNodes.find(n => n.id === activeNodeId) || {};
+      const sshCfg = hardwareState.sshConfig || {};
+      const errTime = sshCfg.errorTimestamp || new Date().toLocaleTimeString();
+      const errType = sshCfg.errorType || 'TIMEOUT';
+      const errMsg = sshCfg.lastError || `Koneksi SSH Timeout: ${targetNode.host}:${targetNode.port || 22}`;
+      const rawMsg = sshCfg.errorRaw ? `\nDetail Exception: ${sshCfg.errorRaw}` : '';
+
+      const fullLog = `[DIAGNOSTIK KONEKSI SSH]\nWaktu: ${errTime}\nTarget Node: ${targetNode.name || 'Target'} (${targetNode.host || sshCfg.targetHost}:${targetNode.port || sshCfg.targetPort || 22})\nUsername: ${targetNode.user || sshCfg.targetUser || 'system'}\nTipe Error: ${errType}\nPesan Error: ${errMsg}${rawMsg}`;
+      copyToClipboard(fullLog, copyTroubleshootLogBtn, '✓ Log Error Tersalin!');
+    });
+  }
+
+  if (copyPshFixBtn) {
+    copyPshFixBtn.addEventListener('click', () => {
+      const pshCodeElem = document.getElementById('powershell-fix-code');
+      const code = pshCodeElem ? pshCodeElem.innerText : '';
+      copyToClipboard(code, copyPshFixBtn, '✓ Script Tersalin!');
+    });
+  }
 
   // Clear Logs Button
   const clearBtn = document.getElementById('clear-logs-btn');

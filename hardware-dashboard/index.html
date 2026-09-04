@@ -586,20 +586,22 @@
         </div>
 
         <!-- Filter Controls for Active Tab -->
-        <div id="filter-bar-alerts" class="flex items-center space-x-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+        <div id="filter-bar-alerts" class="flex flex-wrap items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
           <button data-filter="ALL" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">ALL (<span id="count-all">0</span>)</button>
           <button data-filter="CRITICAL" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10">CRITICAL (<span id="count-critical">0</span>)</button>
           <button data-filter="WARNING" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-400 hover:bg-amber-500/10">WARNING (<span id="count-warning">0</span>)</button>
           <button data-filter="INFO" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:bg-slate-700/20">INFO (<span id="count-info">0</span>)</button>
+          <button id="copy-all-alerts-btn" class="px-2.5 py-1 rounded-lg text-xs font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 transition flex items-center gap-1" title="Salin semua riwayat anomali hardware ke clipboard">📋 Copy All</button>
           <button id="clear-logs-btn" class="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-300">Clear</button>
         </div>
 
-        <div id="filter-bar-events" class="hidden flex items-center space-x-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+        <div id="filter-bar-events" class="hidden flex flex-wrap items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
           <button data-evfilter="ALL" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">ALL (<span id="count-ev-all">0</span>)</button>
           <button data-evfilter="System" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-indigo-300 hover:bg-indigo-500/10">System (<span id="count-ev-system">0</span>)</button>
           <button data-evfilter="Security" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10">Security (<span id="count-ev-sec">0</span>)</button>
           <button data-evfilter="Application" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-purple-300 hover:bg-purple-500/10">Application (<span id="count-ev-app">0</span>)</button>
           <button data-evfilter="WARNING_ERROR" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-400 hover:bg-amber-500/10">Warning/Error (<span id="count-ev-warn">0</span>)</button>
+          <button id="copy-all-events-btn" class="px-2.5 py-1 rounded-lg text-xs font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 transition flex items-center gap-1" title="Salin semua event logs Windows ke clipboard">📋 Copy All</button>
         </div>
 
       </div>
@@ -614,11 +616,12 @@
               <th class="py-2.5 px-3">Komponen / Sensor</th>
               <th class="py-2.5 px-4">Deskripsi Anomali & Nilai Sensor</th>
               <th class="py-2.5 px-3">Tindakan Rekomendasi</th>
+              <th class="py-2.5 px-3 text-right">Aksi</th>
             </tr>
           </thead>
           <tbody id="alerts-table-body" class="divide-y divide-slate-800/60 font-mono">
             <tr>
-              <td colspan="5" class="py-8 text-center text-slate-500 font-sans">
+              <td colspan="6" class="py-8 text-center text-slate-500 font-sans">
                 Memuat data alarm hardware...
               </td>
             </tr>
@@ -637,11 +640,12 @@
               <th class="py-2.5 px-3">Event ID</th>
               <th class="py-2.5 px-4">Provider / Sumber</th>
               <th class="py-2.5 px-4">Deskripsi Kejadian (Message)</th>
+              <th class="py-2.5 px-3 text-right">Aksi</th>
             </tr>
           </thead>
           <tbody id="events-table-body" class="divide-y divide-slate-800/60 font-mono">
             <tr>
-              <td colspan="6" class="py-8 text-center text-slate-500 font-sans">
+              <td colspan="7" class="py-8 text-center text-slate-500 font-sans">
                 Memuat stream Windows Event Log dari target...
               </td>
             </tr>
@@ -709,19 +713,12 @@
           <input 
             type="password" 
             id="modal-node-password" 
-            placeholder="•••••••• (Biarkan kosong jika tidak ingin mengubah)" 
             autocomplete="new-password"
-            oncopy="return false;" 
-            oncut="return false;" 
-            oncontextmenu="return false;" 
-            draggable="false"
-            style="user-select: none; -webkit-user-select: none;"
-            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono tracking-widest text-sm focus:border-cyan-400 focus:outline-none"
-          >
-          <div class="flex justify-between items-center text-[10px] text-slate-500 font-sans">
-            <span>Password dienkripsi di server; dilarang copy/cut/ekstraksi teks.</span>
-            <span class="text-slate-400">Full Dots Mode</span>
-          </div>
+            placeholder="•••••••• (Tersimpan di Vault - isi jika ingin ganti)" 
+            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono tracking-widest focus:border-cyan-400 focus:outline-none select-none">
+          <p class="text-[10px] text-slate-500 italic">
+            * Password disimpan secara terisolasi di sisi server (Vault) dan tidak dapat dilihat maupun disalin dari antarmuka Web.
+          </p>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -749,6 +746,101 @@
           </div>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SSH CONNECTION ERROR & TROUBLESHOOTING POPUP -->
+  <div id="ssh-troubleshoot-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+    <div class="glass-card rounded-2xl border border-rose-500/50 p-6 max-w-2xl w-full shadow-2xl space-y-4 animate-modal max-h-[90vh] overflow-y-auto">
+      
+      <!-- Modal Header -->
+      <div class="flex items-start justify-between border-b border-rose-500/30 pb-3">
+        <div class="flex items-center space-x-3 text-rose-400">
+          <div class="p-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-xl animate-pulse">
+            🔴
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>Kendala Koneksi SSH Target</span>
+              <span id="troubleshoot-node-badge" class="text-xs px-2 py-0.5 rounded font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">TIMEOUT</span>
+            </h3>
+            <p id="troubleshoot-node-info" class="text-xs text-slate-400 font-mono">Target: 192.168.27.203:22 (User: it-ihb\windows)</p>
+          </div>
+        </div>
+        <button id="close-troubleshoot-modal-btn" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+      </div>
+
+      <!-- Diagnostic Summary Box -->
+      <div class="p-3.5 rounded-xl bg-slate-950/80 border border-rose-500/30 space-y-2">
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-slate-400 font-semibold flex items-center gap-1.5">
+            <span>⚠️ Status Diagnostik Error:</span>
+          </span>
+          <span id="troubleshoot-timestamp" class="text-[10px] font-mono text-slate-500">16:05:00</span>
+        </div>
+        <div id="troubleshoot-error-message" class="text-xs font-mono font-semibold text-rose-300 bg-rose-950/40 p-2.5 rounded-lg border border-rose-900/50 break-words">
+          Koneksi SSH Timeout: Komputer target 192.168.27.203:22 tidak merespons (Port 22 mungkin belum dibuka atau service SSHD belum berjalan).
+        </div>
+        <div class="flex items-center justify-between pt-1">
+          <span class="text-[11px] text-slate-400 font-sans">Salin log error ini untuk analisis atau pelaporan:</span>
+          <button id="copy-troubleshoot-log-btn" class="px-3 py-1 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 transition flex items-center gap-1.5 shadow">
+            <span>📋 Salin Pesan Log</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick 1-Line PowerShell Fix Copy -->
+      <div class="p-3.5 rounded-xl bg-slate-900/90 border border-cyan-500/30 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+            <span>⚡ Solusi Instan (Perintah Auto-Fix PowerShell Administrator):</span>
+          </span>
+          <button id="copy-powershell-fix-btn" class="px-3 py-1 rounded-lg text-xs font-bold bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-400/40 transition flex items-center gap-1.5 shadow">
+            <span>📋 Salin Script PowerShell</span>
+          </button>
+        </div>
+        <p class="text-[11px] text-slate-400">Jalankan di <b>PowerShell Administrator</b> pada komputer target untuk memastikan Port 22 terbuka dan Service SSHD aktif:</p>
+        <pre id="powershell-fix-code" class="text-[11px] font-mono text-emerald-300 bg-slate-950 p-2.5 rounded-lg border border-slate-800 overflow-x-auto select-all whitespace-pre-wrap break-all">$p="$env:windir\System32\OpenSSH\sshd.exe"; if (-not (Test-Path $p)) { $p="$env:ProgramFiles\OpenSSH\sshd.exe" }; if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { & sc.exe create sshd binPath= "`"$p`"" start= auto DisplayName= "OpenSSH SSH Server" }; & "$env:windir\System32\OpenSSH\ssh-keygen.exe" -A; Set-Service sshd -StartupType Automatic; Start-Service sshd; netsh advfirewall firewall add rule name="OpenSSH-Server-In-TCP-22" dir=in action=allow protocol=TCP localport=22 profile=any; Write-Host "SSH PORT 22 AKTIF!" -ForegroundColor Green</pre>
+      </div>
+
+      <!-- Interactive Checklist -->
+      <div class="space-y-2">
+        <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Langkah Pengecekan & Pemecahan Masalah:</h4>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-2">
+            <span class="text-cyan-400 font-bold">1.</span>
+            <span class="text-slate-300">Pastikan PC target menyala dan terhubung ke WiFi / LAN yang sama.</span>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-2">
+            <span class="text-cyan-400 font-bold">2.</span>
+            <span class="text-slate-300">Jalankan <code class="text-cyan-300">setup_target_ssh_1click.bat</code> (Run as Administrator) di target.</span>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-2">
+            <span class="text-cyan-400 font-bold">3.</span>
+            <span class="text-slate-300">Pastikan status service <code class="text-cyan-300">sshd</code> adalah <b>Running</b> di target.</span>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-2">
+            <span class="text-cyan-400 font-bold">4.</span>
+            <span class="text-slate-300">Pastikan Username & Password login Windows di Vault sudah sesuai.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Footer -->
+      <div class="flex items-center justify-between pt-3 border-t border-slate-800">
+        <button id="troubleshoot-edit-vault-btn" class="px-4 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 text-xs font-bold transition flex items-center gap-1.5">
+          <span>⚙️ Edit Profil di Vault</span>
+        </button>
+        <div class="flex items-center space-x-2">
+          <button id="troubleshoot-retry-btn" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-slate-950 font-extrabold text-xs shadow-lg shadow-cyan-500/20 transition flex items-center gap-1.5">
+            <span>🔄 Coba Hubungkan Ulang</span>
+          </button>
+          <button id="troubleshoot-dismiss-btn" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition">
+            Tutup
+          </button>
+        </div>
+      </div>
+
     </div>
   </div>
 

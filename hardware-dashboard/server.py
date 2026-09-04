@@ -409,14 +409,26 @@ def poll_ssh_node_worker(node_id):
                 success = False
                 err_str = str(e)
                 curr = nodes_telemetry.get(node_id, {})
+                curr["error_raw"] = err_str
+                curr["error_timestamp"] = time.strftime("%H:%M:%S")
                 if "10054" in err_str or "forcibly closed" in err_str:
-                    curr["last_error"] = "Target host sedang inisialisasi / reset koneksi (Tunggu beberapa detik)"
-                elif "Authentication failed" in err_str:
-                    curr["last_error"] = "Autentikasi gagal (Username atau Password salah)"
-                elif "timed out" in err_str:
-                    curr["last_error"] = "Koneksi timeout (Periksa IP target)"
+                    curr["error_type"] = "RESET_10054"
+                    curr["last_error"] = "Target host sedang inisialisasi / koneksi di-reset oleh remote host (Error 10054)."
+                elif "Authentication failed" in err_str or "auth" in err_str.lower():
+                    curr["error_type"] = "AUTH_FAILED"
+                    curr["last_error"] = "Autentikasi gagal: Username atau Password SSH di Vault tidak sesuai."
+                elif "timed out" in err_str or "timeout" in err_str.lower():
+                    curr["error_type"] = "TIMEOUT"
+                    curr["last_error"] = f"Koneksi SSH Timeout: Komputer target {host}:{port} tidak merespons (Port {port} mungkin belum dibuka atau komputer target offline)."
+                elif "No route to host" in err_str or "unreachable" in err_str.lower() or "10065" in err_str:
+                    curr["error_type"] = "UNREACHABLE"
+                    curr["last_error"] = f"Target host tidak dapat dijangkau di IP {host} (Periksa jaringan lokal / WiFi)."
+                elif "Connection refused" in err_str or "10061" in err_str:
+                    curr["error_type"] = "CONNECTION_REFUSED"
+                    curr["last_error"] = f"Koneksi ditolak pada port {port}: Service SSHD belum berjalan atau firewall memblokir port."
                 else:
-                    curr["last_error"] = f"Error SSH: {err_str[:80]}"
+                    curr["error_type"] = "GENERIC"
+                    curr["last_error"] = f"Gagal terhubung via SSH: {err_str[:120]}"
             finally:
                 if client:
                     try:
@@ -447,6 +459,8 @@ def poll_ssh_node_worker(node_id):
                 curr["latency_ms"] = rtt_ms
                 curr["last_seen"] = time.time()
                 curr["last_error"] = ""
+                curr["error_type"] = "NONE"
+                curr["error_raw"] = ""
                 curr["power_source"] = f"Laptop Battery ({curr.get('battery_pct', 100)}%) / AC Connected"
         else:
             curr["connected"] = False
@@ -680,7 +694,10 @@ def get_node_telemetry_snapshot(node_id):
             "hasPassword": bool(node.get("password")),
             "connected": connected,
             "latencyMs": rtt_latency,
-            "lastError": data.get("last_error", "")
+            "lastError": data.get("last_error", ""),
+            "errorType": data.get("error_type", "NONE"),
+            "errorTimestamp": data.get("error_timestamp", ""),
+            "errorRaw": data.get("error_raw", "")
         },
         "host": hostname,
         "powerSource": power_source,
@@ -776,7 +793,9 @@ class HardwareDashboardHandler(http.server.SimpleHTTPRequestHandler):
                     "isActive": nid == config.get("active_node_id"),
                     "connected": telem.get("connected", False) if n.get("type") == "SSH_REMOTE" else True,
                     "temp": telem.get("cpu_temp", 48.0),
-                    "latencyMs": telem.get("latency_ms", 0)
+                    "latencyMs": telem.get("latency_ms", 0),
+                    "lastError": telem.get("last_error", ""),
+                    "errorType": telem.get("error_type", "NONE")
                 })
 
             res = {
