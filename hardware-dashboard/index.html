@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enterprise Hardware Telemetry & Remote SSH NOC Dashboard</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              900: '#080c14',
+              800: '#0f172a',
+              700: '#1e293b',
+              accent: '#06b6d4',
+              rose: '#f43f5e',
+              emerald: '#10b981',
+              amber: '#f59e0b',
+              purple: '#8b5cf6'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-[#080c14] text-slate-100 min-h-screen font-sans antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
+
+  <!-- Background Cyber Grid & Glow Ambient -->
+  <div class="fixed inset-0 pointer-events-none z-0">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-cyan-900/15 via-transparent to-transparent"></div>
+    <div class="absolute -top-40 -right-40 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl"></div>
+    <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl"></div>
+  </div>
+
+  <!-- Global Alert Bar (Overheating / Fan Stall / Voltage Drop Warning Banner) -->
+  <div id="global-alert-banner" class="hidden sticky top-0 z-50 animate-alert-bar py-2.5 px-4 shadow-xl flex items-center justify-between text-white font-mono text-xs border-b border-rose-400/40">
+    <div class="flex items-center space-x-3">
+      <span class="p-1 rounded-md bg-white/20 animate-bounce">🚨</span>
+      <span id="global-alert-title" class="font-extrabold uppercase tracking-wide">CRITICAL HARDWARE ANOMALY DETECTED</span>
+      <span class="hidden md:inline-block text-white/80">&bull;</span>
+      <span id="global-alert-msg" class="text-white/90">Suhu CPU melebihi ambang batas aman (>85°C). Sistem dalam status throttling.</span>
+    </div>
+    <button id="dismiss-alert-btn" class="px-2.5 py-1 rounded bg-black/30 hover:bg-black/50 text-white text-[11px] font-bold transition">Acknowledge</button>
+  </div>
+
+  <!-- Main Container -->
+  <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-5">
+
+    <!-- TOP MULTI-DEVICE TAB BAR (ENTERPRISE CONCURRENT NOC TARGETS) -->
+    <section class="glass-card rounded-2xl p-3 border border-cyan-500/30 shadow-2xl bg-slate-900/80">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="flex items-center space-x-2 px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700/80">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span class="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">Device Tabs:</span>
+          </div>
+          <!-- Dynamic Device Tabs Container -->
+          <div id="top-node-tabs-container" class="flex flex-wrap items-center gap-2">
+            <!-- Dynamically generated via app.js -->
+          </div>
+        </div>
+
+        <!-- Action Controls -->
+        <div class="flex items-center space-x-2">
+          <button id="btn-add-device-profile" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-slate-950 font-extrabold font-mono text-xs transition flex items-center gap-1.5 shadow-lg shadow-cyan-500/20">
+            <span>➕ Tambah Perangkat SSH</span>
+          </button>
+          <button id="btn-manage-profiles" title="Kelola Profil Perangkat Tersimpan" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-cyan-400 border border-slate-700 transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Top Header: Title, Live Status & Active Profile Badge -->
+    <header class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+      
+      <!-- Brand & Subtitle -->
+      <div class="space-y-1">
+        <div class="flex items-center space-x-3">
+          <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 p-0.5 shadow-lg shadow-cyan-500/20 flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
+              <span>Hardware Telemetry NOC</span>
+              <span class="text-xs px-2 py-0.5 rounded-full font-mono bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">PRO V3.0</span>
+            </h1>
+            <p class="text-xs text-slate-400 font-medium">Enterprise Multi-Device Concurrent SSH Monitoring &bull; Strict Credential Vault &bull; Live Event Stream</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Active Device Status -->
+      <div class="flex flex-wrap items-center gap-3">
+        
+        <!-- Live Connection Badge -->
+        <div id="connection-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-2 shadow">
+          <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+          <span id="connection-status-text">CONNECTING...</span>
+        </div>
+
+        <!-- Active Target Device Indicator -->
+        <div class="px-3 py-1 rounded-xl bg-slate-900/90 border border-slate-700/80 flex items-center gap-2 font-mono text-xs">
+          <span class="text-slate-400">Target Node:</span>
+          <span id="active-node-name" class="text-cyan-300 font-bold">Laptop Acer Nitro i5</span>
+        </div>
+
+        <!-- Live Refresh / Stream Controls -->
+        <button id="toggle-stream-btn" class="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-900 font-bold text-xs uppercase tracking-wider shadow-lg shadow-cyan-500/20 transition flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <span>Stream Active</span>
+        </button>
+
+      </div>
+    </header>
+
+    <!-- SYSTEM DETAILED SPECS QUICK BAR (DYNAMIC SYSTEM INVENTORY) -->
+    <section class="glass-card rounded-2xl p-4 border border-cyan-500/20 bg-slate-900/40">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs font-mono">
+        
+        <!-- Target Hostname & Power -->
+        <div class="flex items-center space-x-3 p-2 rounded-xl bg-slate-900/60 border border-slate-800">
+          <div class="text-xl text-cyan-400">💻</div>
+          <div class="truncate">
+            <div class="text-[10px] text-slate-400 font-sans">Target Hostname & Power</div>
+            <div id="host-name" class="font-bold text-cyan-300 truncate">LAPTOP-69PJ06EP</div>
+            <div id="power-source-text" class="text-[10px] text-emerald-400 truncate">AC Power / Battery Connected</div>
+          </div>
+        </div>
+
+        <!-- Processor Details -->
+        <div class="flex items-center space-x-3 p-2 rounded-xl bg-slate-900/60 border border-slate-800">
+          <div class="text-xl text-indigo-400">⚡</div>
+          <div class="truncate">
+            <div class="text-[10px] text-slate-400 font-sans">CPU Architecture & Topology</div>
+            <div id="cpu-model" class="font-bold text-slate-200 truncate">13th Gen Intel Core i5-13420H</div>
+            <div id="cpu-topology" class="text-[10px] text-indigo-300 truncate">8 Cores &bull; 12 Threads &bull; 12MB L3</div>
+          </div>
+        </div>
+
+        <!-- Motherboard & BIOS -->
+        <div class="flex items-center space-x-3 p-2 rounded-xl bg-slate-900/60 border border-slate-800">
+          <div class="text-xl text-purple-400">🖲️</div>
+          <div class="truncate">
+            <div class="text-[10px] text-slate-400 font-sans">Motherboard & System Model</div>
+            <div id="mb-model-text" class="font-bold text-slate-200 truncate">Acer / RPL Sportage_RTH</div>
+            <div id="gpu-model" class="text-[10px] text-purple-300 truncate">Intel(R) UHD Graphics</div>
+          </div>
+        </div>
+
+        <!-- OS & System Uptime -->
+        <div class="flex items-center space-x-3 p-2 rounded-xl bg-slate-900/60 border border-slate-800">
+          <div class="text-xl text-emerald-400">⏱️</div>
+          <div class="truncate">
+            <div class="text-[10px] text-slate-400 font-sans">OS Build & System Uptime</div>
+            <div id="os-caption-text" class="font-bold text-slate-200 truncate">Windows 11 Home (26200)</div>
+            <div id="sys-uptime-text" class="text-[10px] text-emerald-300 font-bold truncate">Uptime: Aktif</div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Simulation Interactive Controls (Tampak saat mode SIMULATION) -->
+    <section id="simulation-banner" class="hidden glass-card rounded-2xl p-4 border border-amber-500/40 space-y-2 bg-amber-500/5">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-amber-400 flex items-center gap-1.5 font-mono">
+          <span>🧪 SIMULASI SENSOR AKTIF</span> &bull; <span>Uji Respon Alarm & Proteksi Otomatis</span>
+        </span>
+        <span class="text-[11px] text-slate-400">Pilih skenario stres hardware di bawah:</span>
+      </div>
+      <div class="flex flex-wrap gap-2 pt-1">
+        <button id="btn-sim-overheat" class="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-semibold transition flex items-center gap-1.5">
+          🔥 Simulasikan Overheat (96°C)
+        </button>
+        <button id="btn-sim-fan-stall" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-semibold transition flex items-center gap-1.5">
+          ⚠️ Simulasikan Kipas Mati (0 RPM)
+        </button>
+        <button id="btn-sim-voltage-drop" class="px-3 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold transition flex items-center gap-1.5">
+          ⚡ Simulasikan Drop 12V (10.6V)
+        </button>
+        <button id="btn-sim-reset" class="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition flex items-center gap-1.5">
+          ✨ Normal Baseline
+        </button>
+      </div>
+    </section>
+
+    <!-- SECTION 1: SENSOR SUHU (TEMPERATURE MONITORING) -->
+    <section class="space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold text-slate-200 flex items-center gap-2">
+          <span class="text-xl">🌡️</span> 
+          <span>Thermal & Temperature Sensors (Suhu Komponen)</span>
+        </h2>
+        <span class="text-xs text-slate-400">Batas Aman: &lt; 80°C | Warning: 80-85°C | Critical: &gt; 85°C</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        
+        <!-- CPU Package Temp -->
+        <div class="glass-card rounded-2xl p-5 border border-cyan-500/20 relative overflow-hidden flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">CPU Package</span>
+            <span id="cpu-status-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">OPTIMAL</span>
+          </div>
+          <div class="my-4 flex items-center justify-center relative">
+            <svg class="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" class="text-slate-800 fill-none" />
+              <circle id="cpu-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" stroke-dasharray="314.15" stroke-dashoffset="157" stroke-linecap="round" class="text-cyan-400 fill-none transition-all duration-700" />
+            </svg>
+            <div class="absolute flex flex-col items-center justify-center">
+              <span id="cpu-temp-val" class="text-3xl font-extrabold tracking-tight text-white">48.5</span>
+              <span class="text-xs font-medium text-slate-400">°C</span>
+            </div>
+          </div>
+          <div class="space-y-1.5 text-xs">
+            <div class="flex justify-between text-slate-400">
+              <span>Core Max / TjMax:</span>
+              <span id="cpu-tjmax" class="font-mono text-slate-200">52.0°C / 100°C</span>
+            </div>
+            <div class="flex justify-between text-slate-400">
+              <span>Throttling Status:</span>
+              <span id="cpu-throttle" class="font-mono text-emerald-400">No Throttling</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- GPU Temperature -->
+        <div class="glass-card rounded-2xl p-5 border border-cyan-500/20 relative overflow-hidden flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">GPU Core / Graphics</span>
+            <span id="gpu-status-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">OPTIMAL</span>
+          </div>
+          <div class="my-4 flex items-center justify-center relative">
+            <svg class="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" class="text-slate-800 fill-none" />
+              <circle id="gpu-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" stroke-dasharray="314.15" stroke-dashoffset="180" stroke-linecap="round" class="text-emerald-400 fill-none transition-all duration-700" />
+            </svg>
+            <div class="absolute flex flex-col items-center justify-center">
+              <span id="gpu-temp-val" class="text-3xl font-extrabold tracking-tight text-white">42.0</span>
+              <span class="text-xs font-medium text-slate-400">°C</span>
+            </div>
+          </div>
+          <div class="space-y-1.5 text-xs">
+            <div class="flex justify-between text-slate-400">
+              <span>Hotspot / VRAM:</span>
+              <span id="gpu-hotspot" class="font-mono text-slate-200">48.2°C / 45°C</span>
+            </div>
+            <div class="flex justify-between text-slate-400">
+              <span>GPU Power Draw:</span>
+              <span id="gpu-power" class="font-mono text-cyan-300">38.5 W</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Storage Primary Temp -->
+        <div class="glass-card rounded-2xl p-5 border border-cyan-500/20 relative overflow-hidden flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Primary NVMe SSD</span>
+            <span id="nvme-status-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">HEALTHY</span>
+          </div>
+          <div class="my-4 flex items-center justify-center relative">
+            <svg class="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" class="text-slate-800 fill-none" />
+              <circle id="nvme-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" stroke-dasharray="314.15" stroke-dashoffset="200" stroke-linecap="round" class="text-teal-400 fill-none transition-all duration-700" />
+            </svg>
+            <div class="absolute flex flex-col items-center justify-center">
+              <span id="nvme-temp-val" class="text-3xl font-extrabold tracking-tight text-white">38.0</span>
+              <span class="text-xs font-medium text-slate-400">°C</span>
+            </div>
+          </div>
+          <div class="space-y-1.5 text-xs">
+            <div class="flex justify-between text-slate-400">
+              <span>Drive Health (SMART):</span>
+              <span id="nvme-health" class="font-mono text-emerald-400">100% Good</span>
+            </div>
+            <div class="flex justify-between text-slate-400">
+              <span>Read/Write Activity:</span>
+              <span id="nvme-activity" class="font-mono text-slate-200">12.4 MB/s</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Motherboard & VRM Ambient -->
+        <div class="glass-card rounded-2xl p-5 border border-cyan-500/20 relative overflow-hidden flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Motherboard & VRM</span>
+            <span id="mb-status-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">COOL</span>
+          </div>
+          <div class="my-4 flex items-center justify-center relative">
+            <svg class="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" class="text-slate-800 fill-none" />
+              <circle id="mb-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" stroke-dasharray="314.15" stroke-dashoffset="220" stroke-linecap="round" class="text-indigo-400 fill-none transition-all duration-700" />
+            </svg>
+            <div class="absolute flex flex-col items-center justify-center">
+              <span id="mb-temp-val" class="text-3xl font-extrabold tracking-tight text-white">35.0</span>
+              <span class="text-xs font-medium text-slate-400">°C</span>
+            </div>
+          </div>
+          <div class="space-y-1.5 text-xs">
+            <div class="flex justify-between text-slate-400">
+              <span>VRM Phase Temp:</span>
+              <span id="vrm-temp" class="font-mono text-slate-200">41.5°C</span>
+            </div>
+            <div class="flex justify-between text-slate-400">
+              <span>Ambient Chassis:</span>
+              <span id="ambient-temp" class="font-mono text-slate-200">29.0°C</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION 2: DYNAMIC RAM MODULES & SYSTEM MEMORY UTILIZATION -->
+    <section class="glass-card rounded-2xl p-5 border border-cyan-500/20 space-y-4">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <div>
+          <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+            <span class="text-xl">🧠</span>
+            <span>Physical RAM Modules & Active Memory (Spesifikasi RAM Dinamis)</span>
+          </h2>
+          <p class="text-xs text-slate-400">Mendeteksi setiap keping RAM fisik (DIMM Slot), kapasitas, kecepatan MHz, dan produsen secara fleksibel</p>
+        </div>
+        <!-- Active Memory Summary Badge -->
+        <div class="flex items-center space-x-2 font-mono text-xs bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800">
+          <span class="text-slate-400">Total RAM:</span>
+          <span id="ram-total-badge" class="font-bold text-cyan-300">23.7 GB</span>
+          <span class="text-slate-600">|</span>
+          <span class="text-slate-400">In-Use:</span>
+          <span id="ram-used-badge" class="font-bold text-emerald-400">7.1 GB (30%)</span>
+        </div>
+      </div>
+
+      <!-- Active System Memory Usage Bar -->
+      <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+        <div class="flex justify-between text-xs font-mono">
+          <span class="text-slate-300 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+            <span>Active System RAM Allocation</span>
+          </span>
+          <span id="ram-bar-text" class="text-cyan-300 font-bold">7.1 GB / 23.7 GB Used (16.6 GB Free)</span>
+        </div>
+        <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+          <div id="ram-usage-bar" class="bg-gradient-to-r from-cyan-500 to-indigo-500 h-2.5 rounded-full transition-all duration-700" style="width: 30%"></div>
+        </div>
+      </div>
+
+      <!-- Dynamic Physical RAM Modules Cards Container -->
+      <div id="dynamic-ram-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+        <!-- Generated dynamically via app.js -->
+      </div>
+    </section>
+
+    <!-- SECTION 3: DYNAMIC STORAGE DISKS & PARTITIONS (FLEXIBLE MULTI-SSD/HDD) -->
+    <section class="glass-card rounded-2xl p-5 border border-cyan-500/20 space-y-4">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <div>
+          <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+            <span class="text-xl">💾</span>
+            <span>Storage Disks & Logical Partitions (Penyimpanan Fisik & Partisi Dinamis)</span>
+          </h2>
+          <p class="text-xs text-slate-400">Menampilkan kartu terpisah untuk setiap SSD/HDD fisik yang terpasang beserta partisi (C:, D:, E:)</p>
+        </div>
+        <span class="text-xs text-slate-400 font-mono">Auto-detecting Multi-Disks & Volumes</span>
+      </div>
+
+      <!-- Dynamic Storage Disks Grid Container -->
+      <div id="dynamic-storage-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Generated dynamically via app.js -->
+      </div>
+    </section>
+
+    <!-- SECTION 4: KECEPATAN KIPAS & VOLTASE POWER RAILS (2-COLUMN GRID) -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- Fan Speeds (Kecepatan Kipas) -->
+      <section class="glass-card rounded-2xl p-5 border border-cyan-500/20 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+            <span class="text-xl">💨</span>
+            <span>Fan Speeds & Cooling (Kecepatan Kipas)</span>
+          </h2>
+          <span class="text-xs text-slate-400">Ambang Stall: &lt; 400 RPM</span>
+        </div>
+
+        <div class="space-y-3.5">
+
+          <!-- CPU Fan -->
+          <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-cyan-500/30 transition">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center space-x-3">
+                <div class="fan-icon-spin text-cyan-400">
+                  <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2a10 10 0 1010 10A10 10 0 0012 2zm1 17.93V15a1 1 0 00-2 0v4.93A8 8 0 014.07 13H9a1 1 0 000-2H4.07A8 8 0 0111 4.07V9a1 1 0 002 0V4.07A8 8 0 0119.93 11H15a1 1 0 000 2h4.93A8 8 0 0113 19.93z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="text-sm font-bold text-slate-200">CPU Cooling Blower</h3>
+                  <p class="text-[11px] text-slate-400">Target Node Active Cooler</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-lg font-mono font-extrabold text-cyan-300"><span id="cpu-fan-rpm">2150</span> <span class="text-xs text-slate-400 font-sans">RPM</span></div>
+                <div class="text-[11px] text-slate-400">PWM: <span id="cpu-fan-pwm" class="text-cyan-400 font-bold">58%</span></div>
+              </div>
+            </div>
+            <!-- Progress Bar -->
+            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+              <div id="cpu-fan-bar" class="bg-gradient-to-r from-cyan-500 to-teal-400 h-2 rounded-full transition-all duration-500" style="width: 58%"></div>
+            </div>
+          </div>
+
+          <!-- GPU Fan -->
+          <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-cyan-500/30 transition">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center space-x-3">
+                <div class="fan-icon-spin text-emerald-400">
+                  <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2a10 10 0 1010 10A10 10 0 0012 2zm1 17.93V15a1 1 0 00-2 0v4.93A8 8 0 014.07 13H9a1 1 0 000-2H4.07A8 8 0 0111 4.07V9a1 1 0 002 0V4.07A8 8 0 0119.93 11H15a1 1 0 000 2h4.93A8 8 0 0113 19.93z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="text-sm font-bold text-slate-200">GPU Auxiliary Cooler</h3>
+                  <p class="text-[11px] text-slate-400">Graphics Thermal Fan</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-lg font-mono font-extrabold text-emerald-300"><span id="gpu-fan-rpm">1850</span> <span class="text-xs text-slate-400 font-sans">RPM</span></div>
+                <div class="text-[11px] text-slate-400">PWM: <span id="gpu-fan-pwm" class="text-emerald-400 font-bold">52%</span></div>
+              </div>
+            </div>
+            <!-- Progress Bar -->
+            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+              <div id="gpu-fan-bar" class="bg-gradient-to-r from-emerald-500 to-teal-400 h-2 rounded-full transition-all duration-500" style="width: 52%"></div>
+            </div>
+          </div>
+
+          <!-- Chassis System Fan -->
+          <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-cyan-500/30 transition">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center space-x-3">
+                <div class="fan-icon-spin text-indigo-400">
+                  <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2a10 10 0 1010 10A10 10 0 0012 2zm1 17.93V15a1 1 0 00-2 0v4.93A8 8 0 014.07 13H9a1 1 0 000-2H4.07A8 8 0 0111 4.07V9a1 1 0 002 0V4.07A8 8 0 0119.93 11H15a1 1 0 000 2h4.93A8 8 0 0113 19.93z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="text-sm font-bold text-slate-200">Chassis Intake / Case Fan</h3>
+                  <p class="text-[11px] text-slate-400">Airflow Circulation</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-lg font-mono font-extrabold text-indigo-300"><span id="case-fan-rpm">0</span> <span class="text-xs text-slate-400 font-sans">RPM</span></div>
+                <div class="text-[11px] text-slate-400">PWM: <span id="case-fan-pwm" class="text-indigo-400 font-bold">0%</span></div>
+              </div>
+            </div>
+            <!-- Progress Bar -->
+            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+              <div id="case-fan-bar" class="bg-gradient-to-r from-indigo-500 to-purple-400 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Voltages & Power Rails (Voltase & Daya) -->
+      <section class="glass-card rounded-2xl p-5 border border-cyan-500/20 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+            <span class="text-xl">⚡</span>
+            <span>Voltages & Power Delivery (Voltase & Daya)</span>
+          </h2>
+          <span class="text-xs text-slate-400">Standard Tolerance ±5%</span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+
+          <!-- +12V Rail / Battery Rail -->
+          <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex flex-col justify-between">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-300">Main +12V / Battery Rail</span>
+              <span id="v12-badge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">STABLE</span>
+            </div>
+            <div class="my-2">
+              <span id="v12-val" class="text-2xl font-mono font-extrabold text-emerald-400">17.58</span>
+              <span class="text-xs text-slate-400 font-medium">V</span>
+            </div>
+            <div class="text-[11px] text-slate-400 flex justify-between">
+              <span>Safe Range:</span>
+              <span class="font-mono text-slate-300">11.40V - 19.50V</span>
+            </div>
+          </div>
+
+          <!-- +5V Rail -->
+          <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex flex-col justify-between">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-300">+5.0V Logic / USB Rail</span>
+              <span id="v5-badge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">STABLE</span>
+            </div>
+            <div class="my-2">
+              <span id="v5-val" class="text-2xl font-mono font-extrabold text-emerald-400">5.01</span>
+              <span class="text-xs text-slate-400 font-medium">V</span>
+            </div>
+            <div class="text-[11px] text-slate-400 flex justify-between">
+              <span>Safe Range:</span>
+              <span class="font-mono text-slate-300">4.75V - 5.25V</span>
+            </div>
+          </div>
+
+          <!-- +3.3V Rail -->
+          <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex flex-col justify-between">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-300">+3.3V Board Rail</span>
+              <span id="v33-badge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">STABLE</span>
+            </div>
+            <div class="my-2">
+              <span id="v33-val" class="text-2xl font-mono font-extrabold text-emerald-400">3.31</span>
+              <span class="text-xs text-slate-400 font-medium">V</span>
+            </div>
+            <div class="text-[11px] text-slate-400 flex justify-between">
+              <span>Safe Range:</span>
+              <span class="font-mono text-slate-300">3.14V - 3.47V</span>
+            </div>
+          </div>
+
+          <!-- CPU Vcore -->
+          <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex flex-col justify-between">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-300">CPU Core Voltage</span>
+              <span id="vcore-badge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-400">DYNAMIC</span>
+            </div>
+            <div class="my-2">
+              <span id="vcore-val" class="text-2xl font-mono font-extrabold text-cyan-400">1.15</span>
+              <span class="text-xs text-slate-400 font-medium">V</span>
+            </div>
+            <div class="text-[11px] text-slate-400 flex justify-between">
+              <span>Total Power Draw:</span>
+              <span id="total-power-val" class="font-mono text-cyan-300">42.5 W</span>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </div>
+
+    <!-- SECTION 5: DUAL-TAB LOG CONSOLE (HARDWARE ALERTS + WINDOWS OS EVENT STREAM) -->
+    <section class="glass-card rounded-2xl p-5 border border-cyan-500/20 space-y-4">
+      
+      <!-- Tab Headers & Controls -->
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+        
+        <!-- Tab Switcher Buttons -->
+        <div class="flex items-center space-x-2 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+          <button id="tab-btn-alerts" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow flex items-center gap-2 transition">
+            <span>🚨 1. Hardware Anomaly Alerts</span>
+            <span id="badge-alerts-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-cyan-500/30 text-cyan-200">0</span>
+          </button>
+          <button id="tab-btn-events" class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center gap-2 transition">
+            <span>📋 2. Windows OS Event & Task Audit Logs</span>
+            <span id="badge-events-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300">0</span>
+          </button>
+        </div>
+
+        <!-- Filter Controls for Active Tab -->
+        <div id="filter-bar-alerts" class="flex items-center space-x-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+          <button data-filter="ALL" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">ALL (<span id="count-all">0</span>)</button>
+          <button data-filter="CRITICAL" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10">CRITICAL (<span id="count-critical">0</span>)</button>
+          <button data-filter="WARNING" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-400 hover:bg-amber-500/10">WARNING (<span id="count-warning">0</span>)</button>
+          <button data-filter="INFO" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:bg-slate-700/20">INFO (<span id="count-info">0</span>)</button>
+          <button id="clear-logs-btn" class="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-300">Clear</button>
+        </div>
+
+        <div id="filter-bar-events" class="hidden flex items-center space-x-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+          <button data-evfilter="ALL" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">ALL (<span id="count-ev-all">0</span>)</button>
+          <button data-evfilter="System" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-indigo-300 hover:bg-indigo-500/10">System (<span id="count-ev-system">0</span>)</button>
+          <button data-evfilter="Security" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-emerald-300 hover:bg-emerald-500/10">Security (<span id="count-ev-sec">0</span>)</button>
+          <button data-evfilter="Application" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-purple-300 hover:bg-purple-500/10">Application (<span id="count-ev-app">0</span>)</button>
+          <button data-evfilter="WARNING_ERROR" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-400 hover:bg-amber-500/10">Warning/Error (<span id="count-ev-warn">0</span>)</button>
+        </div>
+
+      </div>
+
+      <!-- TAB 1 CONTENT: HARDWARE ANOMALY ALERTS TABLE -->
+      <div id="tab-content-alerts" class="overflow-x-auto rounded-xl border border-slate-800/80 max-h-80 overflow-y-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-900/90 text-slate-400 sticky top-0 uppercase tracking-wider text-[11px] border-b border-slate-800">
+            <tr>
+              <th class="py-2.5 px-4">Waktu (Timestamp)</th>
+              <th class="py-2.5 px-3">Tingkat (Severity)</th>
+              <th class="py-2.5 px-3">Komponen / Sensor</th>
+              <th class="py-2.5 px-4">Deskripsi Anomali & Nilai Sensor</th>
+              <th class="py-2.5 px-3">Tindakan Rekomendasi</th>
+            </tr>
+          </thead>
+          <tbody id="alerts-table-body" class="divide-y divide-slate-800/60 font-mono">
+            <tr>
+              <td colspan="5" class="py-8 text-center text-slate-500 font-sans">
+                Memuat data alarm hardware...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- TAB 2 CONTENT: WINDOWS OS EVENT & TASK AUDIT LOGS TABLE -->
+      <div id="tab-content-events" class="hidden overflow-x-auto rounded-xl border border-slate-800/80 max-h-80 overflow-y-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-900/90 text-slate-400 sticky top-0 uppercase tracking-wider text-[11px] border-b border-slate-800">
+            <tr>
+              <th class="py-2.5 px-4">Waktu</th>
+              <th class="py-2.5 px-3">Severity</th>
+              <th class="py-2.5 px-3">Channel / Log</th>
+              <th class="py-2.5 px-3">Event ID</th>
+              <th class="py-2.5 px-4">Provider / Sumber</th>
+              <th class="py-2.5 px-4">Deskripsi Kejadian (Message)</th>
+            </tr>
+          </thead>
+          <tbody id="events-table-body" class="divide-y divide-slate-800/60 font-mono">
+            <tr>
+              <td colspan="6" class="py-8 text-center text-slate-500 font-sans">
+                Memuat stream Windows Event Log dari target...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </section>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-slate-500 pt-4 pb-8 space-y-1">
+      <p>Enterprise Hardware Sensor Telemetry & SSH Remote Sensor NOC Dashboard</p>
+      <p class="text-[11px] text-slate-600">Terintegrasi dengan OpenSSH Remote Query &bull; Windows WMI & Event Logs &bull; Multi-SSD & Multi-RAM Architecture &bull; Strict Credential Vault</p>
+    </footer>
+
+  </div>
+
+  <!-- MODAL: ADD / EDIT DEVICE PROFILE (STRICT PASSWORD VAULT) -->
+  <div id="device-profile-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+    <div class="glass-card rounded-2xl border border-cyan-500/40 p-6 max-w-lg w-full shadow-2xl space-y-4 animate-modal">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center space-x-2 text-cyan-400">
+          <span class="text-lg">🛡️</span>
+          <h3 id="modal-profile-title" class="text-base font-bold text-white">Profil Perangkat & Credential Vault</h3>
+        </div>
+        <button id="close-profile-modal-btn" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+      </div>
+
+      <form id="device-profile-form" class="space-y-3.5 text-xs">
+        <input type="hidden" id="modal-node-id" value="">
+
+        <div>
+          <label class="block text-slate-300 font-semibold mb-1">Nama Alias Perangkat:</label>
+          <input type="text" id="modal-node-name" placeholder="contoh: Laptop Acer Nitro i5 / Server Backup" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-sans focus:border-cyan-400 focus:outline-none" required>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-300 font-semibold mb-1">Alamat IP / Host Target:</label>
+            <input type="text" id="modal-node-host" placeholder="172.16.4.205" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-cyan-400 focus:outline-none" required>
+          </div>
+          <div>
+            <label class="block text-slate-300 font-semibold mb-1">Port SSH:</label>
+            <input type="number" id="modal-node-port" placeholder="22" value="22" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-cyan-400 focus:outline-none" required>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-semibold mb-1">Username SSH Windows/Linux:</label>
+          <input type="text" id="modal-node-user" placeholder="laptop-69pj06ep\acer" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-cyan-400 focus:outline-none" required>
+        </div>
+
+        <!-- STRICT PASSWORD VAULT FIELD: NO VIEWING, NO COPYING, FULL DOTS ONLY -->
+        <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+          <div class="flex items-center justify-between">
+            <label class="block text-slate-200 font-semibold flex items-center gap-1.5">
+              <span>Password SSH:</span>
+              <span id="modal-pwd-status" class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-normal">Tersimpan</span>
+            </label>
+            <span class="text-[10px] text-amber-400 font-mono flex items-center gap-1">
+              <span>🔒 Strict Vault Protected</span>
+            </span>
+          </div>
+          
+          <input 
+            type="password" 
+            id="modal-node-password" 
+            placeholder="•••••••• (Biarkan kosong jika tidak ingin mengubah)" 
+            autocomplete="new-password"
+            oncopy="return false;" 
+            oncut="return false;" 
+            oncontextmenu="return false;" 
+            draggable="false"
+            style="user-select: none; -webkit-user-select: none;"
+            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono tracking-widest text-sm focus:border-cyan-400 focus:outline-none"
+          >
+          <div class="flex justify-between items-center text-[10px] text-slate-500 font-sans">
+            <span>Password dienkripsi di server; dilarang copy/cut/ekstraksi teks.</span>
+            <span class="text-slate-400">Full Dots Mode</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-300 font-semibold mb-1">Interval Polling (Detik):</label>
+            <input type="number" step="0.5" id="modal-node-interval" placeholder="2.0" value="2.0" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-cyan-400 focus:outline-none" required>
+          </div>
+          <div class="flex items-end pb-1">
+            <label class="flex items-center space-x-2 cursor-pointer text-slate-300 font-semibold">
+              <input type="checkbox" id="modal-node-enabled" checked class="w-4 h-4 rounded text-cyan-500 bg-slate-900 border-slate-700 focus:ring-0">
+              <span>Aktifkan Monitoring Node</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="modal-profile-feedback" class="hidden text-center text-xs font-semibold py-1.5 rounded"></div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+          <button type="button" id="delete-profile-btn" class="hidden px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-bold transition">
+            Hapus Perangkat
+          </button>
+          <div class="flex items-center space-x-2 ml-auto">
+            <button type="button" id="cancel-profile-modal-btn" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition">Batal</button>
+            <button type="submit" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-slate-950 font-extrabold shadow-lg shadow-cyan-500/20 transition">Simpan Profil</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- JavaScript Logic -->
+  <script src="app.js"></script>
+</body>
+</html>

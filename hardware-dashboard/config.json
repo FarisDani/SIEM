@@ -1,0 +1,41 @@
+{
+  "active_node_id": "node_laptop_acer",
+  "source_mode": "SSH_REMOTE",
+  "nodes": [
+    {
+      "id": "node_laptop_acer",
+      "name": "Laptop Acer Nitro i5",
+      "type": "SSH_REMOTE",
+      "host": "172.16.4.205",
+      "port": 22,
+      "user": "laptop-69pj06ep\\acer",
+      "password": "132109",
+      "key_path": "",
+      "poll_interval_seconds": 2.0,
+      "enabled": true
+    },
+    {
+      "id": "node_local_pc",
+      "name": "Local PC Host",
+      "type": "LOCAL_HOST",
+      "host": "127.0.0.1",
+      "port": 0,
+      "user": "SYSTEM",
+      "password": "",
+      "key_path": "",
+      "poll_interval_seconds": 2.0,
+      "enabled": true
+    }
+  ],
+  "ssh": {
+    "host": "172.16.4.205",
+    "port": 22,
+    "user": "laptop-69pj06ep\\acer",
+    "password": "132109",
+    "key_path": "",
+    "poll_interval_seconds": 2
+  },
+  "local": {
+    "poll_interval_seconds": 2.0
+  }
+}

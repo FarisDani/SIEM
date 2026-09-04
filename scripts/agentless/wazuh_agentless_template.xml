@@ -1,0 +1,27 @@
+<!-- ============================================================================== -->
+<!-- Template Konfigurasi Wazuh Agentless Monitoring via SSH                        -->
+<!-- Sisipkan blok ini ke dalam file /var/ossec/etc/ossec.conf di Wazuh Manager     -->
+<!-- ============================================================================== -->
+
+<ossec_config>
+  <!-- 1. Audit Integritas Berkas Target Linux (Setiap 300 detik / 5 menit) -->
+  <agentless>
+    <type>ssh_integrity_check_linux</type>
+    <custom>ssh_generic_diff</custom>
+    <frequency>300</frequency>
+    <host>wazuh_ssh@192.168.27.50</host>
+    <state>periodic</state>
+    <arguments>/bin /etc /sbin</arguments>
+  </agentless>
+
+  <!-- 2. Contoh Monitoring Target Windows OpenSSH via SSH -->
+  <!--
+  <agentless>
+    <type>ssh_generic_diff</type>
+    <frequency>300</frequency>
+    <host>Administrator@192.168.27.50</host>
+    <state>periodic</state>
+    <arguments>dir C:\Windows\System32\drivers\etc</arguments>
+  </agentless>
+  -->
+</ossec_config>
