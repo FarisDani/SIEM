@@ -1,5 +1,5 @@
 {
-  "active_node_id": "node_laptop_acer",
+  "active_node_id": "node_bfa03107",
   "source_mode": "SSH_REMOTE",
   "nodes": [
     {
@@ -25,6 +25,18 @@
       "key_path": "",
       "poll_interval_seconds": 2.0,
       "enabled": true
+    },
+    {
+      "id": "node_bfa03107",
+      "name": "pc diki",
+      "type": "SSH_REMOTE",
+      "host": "192.168.27.203",
+      "port": 22,
+      "user": "it-ihb\\windows",
+      "password": "hp",
+      "key_path": "",
+      "poll_interval_seconds": 2.0,
+      "enabled": true
     }
   ],
   "ssh": {
@@ -37,5 +49,11 @@
   },
   "local": {
     "poll_interval_seconds": 2.0
+  },
+  "wazuh": {
+    "enabled": false,
+    "manager_url": "https://127.0.0.1:55000",
+    "user": "wazuh-api",
+    "status": "Standalone Agentless Mode (Direct SSH/WMI Active)"
   }
 }

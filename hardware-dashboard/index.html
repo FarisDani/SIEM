@@ -145,8 +145,8 @@
           <div class="text-xl text-cyan-400">💻</div>
           <div class="truncate">
             <div class="text-[10px] text-slate-400 font-sans">Target Hostname & Power</div>
-            <div id="host-name" class="font-bold text-cyan-300 truncate">LAPTOP-69PJ06EP</div>
-            <div id="power-source-text" class="text-[10px] text-emerald-400 truncate">AC Power / Battery Connected</div>
+            <div id="host-name" class="font-bold text-cyan-300 truncate truncate-hoverable" data-tooltip-title="Target Host" data-tooltip="LAPTOP-69PJ06EP">LAPTOP-69PJ06EP</div>
+            <div id="power-source-text" class="text-[10px] text-emerald-400 truncate truncate-hoverable" data-tooltip-title="Power Source" data-tooltip="AC Power / Battery Connected">AC Power / Battery Connected</div>
           </div>
         </div>
 
@@ -155,8 +155,8 @@
           <div class="text-xl text-indigo-400">⚡</div>
           <div class="truncate">
             <div class="text-[10px] text-slate-400 font-sans">CPU Architecture & Topology</div>
-            <div id="cpu-model" class="font-bold text-slate-200 truncate">13th Gen Intel Core i5-13420H</div>
-            <div id="cpu-topology" class="text-[10px] text-indigo-300 truncate">8 Cores &bull; 12 Threads &bull; 12MB L3</div>
+            <div id="cpu-model" class="font-bold text-slate-200 truncate truncate-hoverable" data-tooltip-title="Processor Model" data-tooltip="13th Gen Intel Core i5-13420H">13th Gen Intel Core i5-13420H</div>
+            <div id="cpu-topology" class="text-[10px] text-indigo-300 truncate truncate-hoverable" data-tooltip-title="CPU Architecture" data-tooltip="8 Cores • 12 Threads • 12MB L3 Cache">8 Cores &bull; 12 Threads &bull; 12MB L3</div>
           </div>
         </div>
 
@@ -165,8 +165,8 @@
           <div class="text-xl text-purple-400">🖲️</div>
           <div class="truncate">
             <div class="text-[10px] text-slate-400 font-sans">Motherboard & System Model</div>
-            <div id="mb-model-text" class="font-bold text-slate-200 truncate">Acer / RPL Sportage_RTH</div>
-            <div id="gpu-model" class="text-[10px] text-purple-300 truncate">Intel(R) UHD Graphics</div>
+            <div id="mb-model-text" class="font-bold text-slate-200 truncate truncate-hoverable" data-tooltip-title="Motherboard Model" data-tooltip="Acer / RPL Sportage_RTH">Acer / RPL Sportage_RTH</div>
+            <div id="gpu-model" class="text-[10px] text-purple-300 truncate truncate-hoverable" data-tooltip-title="GPU Model" data-tooltip="Intel(R) UHD Graphics">Intel(R) UHD Graphics</div>
           </div>
         </div>
 
@@ -175,8 +175,8 @@
           <div class="text-xl text-emerald-400">⏱️</div>
           <div class="truncate">
             <div class="text-[10px] text-slate-400 font-sans">OS Build & System Uptime</div>
-            <div id="os-caption-text" class="font-bold text-slate-200 truncate">Windows 11 Home (26200)</div>
-            <div id="sys-uptime-text" class="text-[10px] text-emerald-300 font-bold truncate">Uptime: Aktif</div>
+            <div id="os-caption-text" class="font-bold text-slate-200 truncate truncate-hoverable" data-tooltip-title="Operating System" data-tooltip="Windows 11 Home (26200)">Windows 11 Home (26200)</div>
+            <div id="sys-uptime-text" class="text-[10px] text-emerald-300 font-bold truncate truncate-hoverable" data-tooltip-title="System Uptime" data-tooltip="Uptime: Aktif">Uptime: Aktif</div>
           </div>
         </div>
 
@@ -751,6 +751,9 @@
       </form>
     </div>
   </div>
+
+  <!-- Global Cyber NOC Floating Tooltip -->
+  <div id="cyber-floating-tooltip" class="cyber-floating-tooltip tooltip-hidden"></div>
 
   <!-- JavaScript Logic -->
   <script src="app.js"></script>

@@ -27,10 +27,10 @@ Aplikasi **Hardware Monitoring Dashboard Standalone** yang dibangun khusus untuk
 3. Server otomatis berjalan dan browser Anda akan langsung membuka **`http://localhost:8088`**.
 
 ### 2. Menghubungkan Laptop Target via SSH
-1. Ikuti panduan setup di: [`docs/panduan_setup_ssh_laptop_hardware_dashboard.md`](file:///d:/Faris/Github/SEIM/docs/panduan_setup_ssh_laptop_hardware_dashboard.md).
-2. Di web dashboard `http://localhost:8088`, klik tombol ikon **⚙️ (Pengaturan SSH)** di kanan atas.
-3. Masukkan **IP Laptop Target** dan **User SSH**, lalu klik **"Simpan & Hubungkan"**.
-4. Status akan langsung berubah menjadi **`🟢 SSH CONNECTED`** lengkap dengan grafik suhu dan putaran kipas laptop target!
+1. Ikuti panduan setup lengkap di: [`docs/panduan_integrasi_ssh_perangkat_dashboard.md`](file:///d:/Faris/Github/SEIM/docs/panduan_integrasi_ssh_perangkat_dashboard.md).
+2. Di web dashboard `http://localhost:8088`, klik tombol **`➕ Tambah Profil`** di tab atas atau ikon **⚙️**.
+3. Masukkan **IP Laptop Target**, **User SSH**, dan **Password**, lalu klik **"Simpan Profil"**.
+4. Status akan langsung berubah menjadi **`🟢 SSH CONNECTED`** lengkap dengan inventaris hardware fisik (multi-SSD, multi-RAM) dan Windows event logs!
 
 ---
 

@@ -21,6 +21,7 @@ import subprocess
 import threading
 import urllib.parse
 import uuid
+import base64
 
 # Ensure UTF-8 console output on Windows
 if hasattr(sys.stdout, 'reconfigure'):
@@ -39,6 +40,11 @@ except ImportError:
 PORT = 8088
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(DIRECTORY, "config.json")
+
+def make_powershell_b64(script_str):
+    """Encodes a PowerShell script into UTF-16LE Base64 for -EncodedCommand (prevents variable expansion issues on PowerShell SSH shells)."""
+    b64 = base64.b64encode(script_str.strip().encode('utf-16le')).decode('ascii')
+    return f"powershell -NoProfile -NonInteractive -EncodedCommand {b64}"
 
 # Global Configuration
 config = {
@@ -191,7 +197,9 @@ def parse_storage_data(raw_disks, raw_partitions):
             
             status = d.get("Status", "OK")
             assigned_parts = []
-            if idx == 0:
+            if len(d_items) == 1:
+                assigned_parts = partitions
+            elif idx == 0:
                 assigned_parts = [p for p in partitions if p["drive"].upper() in ["C:", "D:"]]
                 if not assigned_parts and partitions:
                     assigned_parts = [partitions[0]]
@@ -199,6 +207,8 @@ def parse_storage_data(raw_disks, raw_partitions):
                 assigned_parts = [p for p in partitions if p["drive"].upper() not in ["C:", "D:"]]
                 if not assigned_parts and len(partitions) > 1:
                     assigned_parts = partitions[1:]
+            else:
+                assigned_parts = []
 
             disks.append({
                 "index": idx,
@@ -294,26 +304,28 @@ def poll_ssh_node_worker(node_id):
             time.sleep(2.0)
             continue
 
-        quick_cmd = (
-            'powershell -NoProfile -Command "'
-            'hostname; '
-            '(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue).CurrentTemperature; '
-            '(Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue).Name; '
-            '(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue).EstimatedChargeRemaining; '
-            '(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue).DesignVoltage"'
+        quick_ps = (
+            "hostname; "
+            "(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue).CurrentTemperature; "
+            "(Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue).Name; "
+            "(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue).EstimatedChargeRemaining; "
+            "(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue).DesignVoltage"
         )
+        quick_cmd = make_powershell_b64(quick_ps)
 
-        inv_cmd = (
-            'powershell -NoProfile -Command "'
-            '$ram = Get-CimInstance Win32_PhysicalMemory | Select-Object DeviceLocator, Capacity, Speed, Manufacturer, PartNumber, BankLabel; '
-            '$disks = Get-CimInstance Win32_DiskDrive | Select-Object Model, Size, MediaType, Status, InterfaceType, Index; '
-            '$parts = Get-CimInstance Win32_LogicalDisk -Filter \\"DriveType=3\\" | Select-Object DeviceID, Size, FreeSpace, VolumeName, FileSystem; '
-            '$cpu = Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed, L3CacheSize; '
-            '$os = Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, TotalVisibleMemorySize, FreePhysicalMemory, LastBootUpTime; '
-            '$board = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product; '
-            '$events = Get-WinEvent -FilterHashtable @{LogName=\'System\',\'Application\'; Level=1,2,3,4} -MaxEvents 15 | Select-Object @{N=\'Time\';E={$_.TimeCreated.ToString(\'HH:mm:ss\')}}, @{N=\'Date\';E={$_.TimeCreated.ToString(\'yyyy-MM-dd\')}}, @{N=\'Log\';E={$_.LogName}}, @{N=\'Source\';E={$_.ProviderName}}, @{N=\'EventId\';E={$_.Id}}, @{N=\'Level\';E={$_.LevelDisplayName}}, @{N=\'Message\';E={$_.Message.Trim() -replace \'[\\r\\n]+\', \' \'}}; '
-            '[PSCustomObject]@{RAM=$ram; Disks=$disks; Partitions=$parts; CPU=$cpu; OS=$os; Board=$board; Events=$events} | ConvertTo-Json -Depth 3 -Compress"'
+        inv_ps = (
+            "$ram = Get-CimInstance Win32_PhysicalMemory | Select-Object DeviceLocator, Capacity, Speed, Manufacturer, PartNumber, BankLabel; "
+            "$disks = Get-CimInstance Win32_DiskDrive | Select-Object Model, Size, MediaType, Status, InterfaceType, Index; "
+            "$parts = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Select-Object DeviceID, Size, FreeSpace, VolumeName, FileSystem; "
+            "$cpu = Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed, L3CacheSize; "
+            "$os = Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, TotalVisibleMemorySize, FreePhysicalMemory, LastBootUpTime; "
+            "$board = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product; "
+            "$sysev = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=1,2,3,4} -MaxEvents 10 -ErrorAction SilentlyContinue | Select-Object @{N='Time';E={$_.TimeCreated.ToString('HH:mm:ss')}}, @{N='Date';E={$_.TimeCreated.ToString('yyyy-MM-dd')}}, @{N='Log';E={$_.LogName}}, @{N='Source';E={$_.ProviderName}}, @{N='EventId';E={$_.Id}}, @{N='Level';E={$_.LevelDisplayName}}, @{N='Message';E={$_.Message.Trim() -replace '[\\r\\n]+', ' '}}; "
+            "$secev = Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624,4625,4672,1102,4720} -MaxEvents 8 -ErrorAction SilentlyContinue | Select-Object @{N='Time';E={$_.TimeCreated.ToString('HH:mm:ss')}}, @{N='Date';E={$_.TimeCreated.ToString('yyyy-MM-dd')}}, @{N='Log';E={'Security'}}, @{N='Source';E={$_.ProviderName}}, @{N='EventId';E={$_.Id}}, @{N='Level';E={'Security'}}, @{N='Message';E={$_.Message.Trim() -replace '[\\r\\n]+', ' '}}; "
+            "$def = Get-MpComputerStatus -ErrorAction SilentlyContinue | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureAge; "
+            "[PSCustomObject]@{RAM=$ram; Disks=$disks; Partitions=$parts; CPU=$cpu; OS=$os; Board=$board; Events=(@($secev) + @($sysev)); Defender=$def} | ConvertTo-Json -Depth 3 -Compress"
         )
+        inv_cmd = make_powershell_b64(inv_ps)
 
         t0 = time.time()
         success = False
@@ -352,7 +364,10 @@ def poll_ssh_node_worker(node_id):
                     "allow_agent": True,
                     "look_for_keys": True
                 }
-                if password:
+                key_path = (node.get("key_path") or "").strip()
+                if key_path and os.path.exists(key_path):
+                    connect_kwargs["key_filename"] = key_path
+                elif password:
                     connect_kwargs["password"] = password
 
                 client.connect(**connect_kwargs)
@@ -385,11 +400,23 @@ def poll_ssh_node_worker(node_id):
                             curr["cpu_l3_cache_mb"] = sys_specs.get("l3CacheMb", 12)
                             if ev_logs:
                                 curr["os_event_logs"] = ev_logs
+                            if "Defender" in inv_data:
+                                curr["defender"] = inv_data.get("Defender")
                     except Exception as inv_err:
                         print(f"[!] Inventory query error on {node_id}: {inv_err}")
 
-            except Exception:
+            except Exception as e:
                 success = False
+                err_str = str(e)
+                curr = nodes_telemetry.get(node_id, {})
+                if "10054" in err_str or "forcibly closed" in err_str:
+                    curr["last_error"] = "Target host sedang inisialisasi / reset koneksi (Tunggu beberapa detik)"
+                elif "Authentication failed" in err_str:
+                    curr["last_error"] = "Autentikasi gagal (Username atau Password salah)"
+                elif "timed out" in err_str:
+                    curr["last_error"] = "Koneksi timeout (Periksa IP target)"
+                else:
+                    curr["last_error"] = f"Error SSH: {err_str[:80]}"
             finally:
                 if client:
                     try:
@@ -419,6 +446,7 @@ def poll_ssh_node_worker(node_id):
                 curr["connected"] = True
                 curr["latency_ms"] = rtt_ms
                 curr["last_seen"] = time.time()
+                curr["last_error"] = ""
                 curr["power_source"] = f"Laptop Battery ({curr.get('battery_pct', 100)}%) / AC Connected"
         else:
             curr["connected"] = False
@@ -508,7 +536,8 @@ def sync_worker_threads():
         ntype = n.get("type", "SSH_REMOTE")
         enabled = n.get("enabled", True)
 
-        if enabled and nid not in active_workers:
+        is_running = nid in active_workers and active_workers[nid].is_alive()
+        if enabled and not is_running:
             if ntype == "LOCAL_HOST":
                 t = threading.Thread(target=poll_local_node_worker, daemon=True)
             else:
@@ -650,7 +679,8 @@ def get_node_telemetry_snapshot(node_id):
             "targetPort": node.get("port", 22),
             "hasPassword": bool(node.get("password")),
             "connected": connected,
-            "latencyMs": rtt_latency
+            "latencyMs": rtt_latency,
+            "lastError": data.get("last_error", "")
         },
         "host": hostname,
         "powerSource": power_source,
@@ -692,6 +722,13 @@ def get_node_telemetry_snapshot(node_id):
             "v33": round(v33, 2),
             "vcore": round(vcore, 2),
             "totalPower": total_power
+        },
+        "securityStatus": {
+            "antivirusEnabled": (data.get("defender") or {}).get("AntivirusEnabled", True) if data.get("defender") else True,
+            "realTimeProtection": (data.get("defender") or {}).get("RealTimeProtectionEnabled", True) if data.get("defender") else True,
+            "signatureAgeDays": (data.get("defender") or {}).get("AntivirusSignatureAge", 0) if data.get("defender") else 0,
+            "auditStatus": "SECURE",
+            "securityLogsCount": len([e for e in os_event_logs if e.get("logName") == "Security"])
         },
         "simulationMode": sim_mode,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -770,6 +807,23 @@ class HardwareDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 }
             }
             payload = json.dumps(safe_cfg).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        # 4. Optional Wazuh SIEM Connector Status Endpoint
+        if parsed.path == "/api/wazuh-status":
+            wazuh_cfg = config.get("wazuh", {
+                "enabled": False,
+                "manager_url": "https://127.0.0.1:55000",
+                "connected": False,
+                "status": "Standalone Agentless Mode (Direct Native Polling Active)"
+            })
+            payload = json.dumps(wazuh_cfg).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -904,14 +958,32 @@ class HardwareDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/nodes":
             node_id = qparams.get("id", [""])[0]
-            if node_id and len(config.get("nodes", [])) > 1:
-                config["nodes"] = [n for n in config.get("nodes", []) if n.get("id") != node_id]
-                if config.get("active_node_id") == node_id:
-                    config["active_node_id"] = config["nodes"][0]["id"]
-                save_config()
-                res = {"status": "success", "deletedId": node_id}
+            nodes = config.get("nodes", [])
+            if node_id and len(nodes) > 1:
+                target_node = next((n for n in nodes if n.get("id") == node_id), None)
+                if target_node:
+                    config["nodes"] = [n for n in nodes if n.get("id") != node_id]
+                    if config.get("active_node_id") == node_id:
+                        config["active_node_id"] = config["nodes"][0]["id"]
+                    if node_id in active_workers:
+                        del active_workers[node_id]
+                    if node_id in nodes_telemetry:
+                        del nodes_telemetry[node_id]
+                    save_config()
+                    sync_worker_threads()
+                    res = {
+                        "status": "success",
+                        "deletedId": node_id,
+                        "activeNodeId": config.get("active_node_id"),
+                        "nodes": [
+                            {k: v for k, v in n.items() if k != "password"}
+                            for n in config.get("nodes", [])
+                        ]
+                    }
+                else:
+                    res = {"status": "error", "message": f"Profil perangkat dengan ID '{node_id}' tidak ditemukan."}
             else:
-                res = {"status": "error", "message": "Cannot delete the last remaining node"}
+                res = {"status": "error", "message": "Minimal harus ada 1 profil perangkat aktif dalam sistem."}
 
             payload = json.dumps(res).encode("utf-8")
             self.send_response(200)

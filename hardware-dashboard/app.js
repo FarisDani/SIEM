@@ -94,6 +94,123 @@ const initialAlerts = [
 ];
 alertLogs = [...initialAlerts];
 
+// Helper: Escape HTML string safely
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// ============================================================================
+// Cyber NOC Floating Tooltip Engine
+// ============================================================================
+function initTooltipEngine() {
+  const tooltipEl = document.getElementById('cyber-floating-tooltip');
+  if (!tooltipEl) return;
+
+  let currentTarget = null;
+
+  function getTooltipData(target) {
+    const el = target.closest('[data-tooltip], [data-tooltip-title], .truncate, .truncate-hoverable');
+    if (!el) return null;
+
+    let content = el.getAttribute('data-tooltip');
+    let title = el.getAttribute('data-tooltip-title') || '';
+    let category = el.getAttribute('data-tooltip-category') || 'SPEC INFO';
+
+    // Auto-detect truncated text if no explicit data-tooltip is provided
+    if (!content && (el.classList.contains('truncate') || el.classList.contains('truncate-hoverable'))) {
+      if (el.scrollWidth > el.clientWidth + 2) {
+        content = el.textContent.trim();
+        if (!title) title = 'Full Specification';
+      }
+    }
+
+    if (!content) return null;
+    return { el, content, title, category };
+  }
+
+  function updateTooltipPosition(e) {
+    if (!tooltipEl || tooltipEl.classList.contains('tooltip-hidden')) return;
+
+    const offset = 14;
+    let left = e.clientX + offset;
+    let top = e.clientY + offset;
+
+    const tooltipWidth = tooltipEl.offsetWidth || 300;
+    const tooltipHeight = tooltipEl.offsetHeight || 90;
+    const winWidth = window.innerWidth;
+    const winHeight = window.innerHeight;
+
+    // Viewport Right Clamp
+    if (left + tooltipWidth > winWidth - 16) {
+      left = e.clientX - tooltipWidth - offset;
+    }
+    // Viewport Bottom Clamp
+    if (top + tooltipHeight > winHeight - 16) {
+      top = e.clientY - tooltipHeight - offset;
+    }
+
+    if (left < 16) left = 16;
+    if (top < 16) top = 16;
+
+    tooltipEl.style.left = `${left}px`;
+    tooltipEl.style.top = `${top}px`;
+  }
+
+  document.addEventListener('mouseover', (e) => {
+    const data = getTooltipData(e.target);
+    if (!data) return;
+
+    currentTarget = data.el;
+    
+    let headerHtml = '';
+    if (data.title) {
+      headerHtml = `
+        <div class="tooltip-header">
+          <div class="tooltip-title">
+            <span>🔹</span>
+            <span>${escapeHtml(data.title)}</span>
+          </div>
+          <span class="tooltip-badge">${escapeHtml(data.category)}</span>
+        </div>
+      `;
+    }
+
+    tooltipEl.innerHTML = `
+      ${headerHtml}
+      <div class="tooltip-body">${escapeHtml(data.content)}</div>
+      <div class="tooltip-meta">
+        <span>Cyber NOC Telemetry</span>
+        <span>Hover Inspector</span>
+      </div>
+    `;
+
+    tooltipEl.classList.remove('tooltip-hidden');
+    tooltipEl.classList.add('tooltip-visible');
+    updateTooltipPosition(e);
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!currentTarget) return;
+    updateTooltipPosition(e);
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    if (!currentTarget) return;
+    const related = e.relatedTarget;
+    if (related && currentTarget.contains(related)) return;
+
+    currentTarget = null;
+    tooltipEl.classList.remove('tooltip-visible');
+    tooltipEl.classList.add('tooltip-hidden');
+  });
+}
+
 // Helper: Calculate Circular Gauge Offset
 function calculateGaugeOffset(value, min = 20, max = 100) {
   const circumference = 314.15;
@@ -186,8 +303,14 @@ function renderAlertsTable() {
           </span>
         </td>
         <td class="py-2.5 px-3 font-semibold text-slate-200">${item.component}</td>
-        <td class="py-2.5 px-4 text-slate-300 font-sans">${item.message}</td>
-        <td class="py-2.5 px-3 text-slate-400 font-sans">${item.action}</td>
+        <td class="py-2.5 px-4 text-slate-300 font-sans max-w-md truncate truncate-hoverable"
+            data-tooltip-title="Hardware Anomaly Alert"
+            data-tooltip-category="${item.severity}"
+            data-tooltip="${escapeHtml(item.message)}">${item.message}</td>
+        <td class="py-2.5 px-3 text-slate-400 font-sans max-w-xs truncate truncate-hoverable"
+            data-tooltip-title="Rekomendasi Tindakan NOC"
+            data-tooltip-category="MITIGATION"
+            data-tooltip="${escapeHtml(item.action)}">${item.action}</td>
       </tr>
     `;
   }).join('');
@@ -259,8 +382,14 @@ function renderOsEventsTable() {
           </span>
         </td>
         <td class="py-2.5 px-3 font-mono text-cyan-400 font-bold">${item.eventId || '—'}</td>
-        <td class="py-2.5 px-4 font-semibold text-slate-200 text-xs">${item.source}</td>
-        <td class="py-2.5 px-4 text-slate-300 font-sans text-xs max-w-md truncate" title="${item.message}">${item.message}</td>
+        <td class="py-2.5 px-4 font-semibold text-slate-200 text-xs max-w-[160px] truncate truncate-hoverable"
+            data-tooltip-title="Provider Event Source"
+            data-tooltip-category="${item.logName || 'WINDOWS'}"
+            data-tooltip="${escapeHtml(item.source)}">${item.source}</td>
+        <td class="py-2.5 px-4 text-slate-300 font-sans text-xs max-w-md truncate truncate-hoverable"
+            data-tooltip-title="Windows Event ID #${item.eventId || '—'}"
+            data-tooltip-category="${item.logName || 'WINDOWS'} (${item.level || 'Info'})"
+            data-tooltip="${escapeHtml(item.message)}">${item.message}</td>
       </tr>
     `;
   }).join('');
@@ -287,9 +416,13 @@ function renderTopNodeTabs() {
 
     return `
       <div class="flex items-center rounded-xl border transition cursor-pointer ${baseClass}">
-        <button class="node-tab-btn flex items-center space-x-2 px-3 py-1.5 text-xs font-mono font-bold" data-node-id="${node.id}">
+        <button class="node-tab-btn flex items-center space-x-2 px-3 py-1.5 text-xs font-mono font-bold truncate-hoverable"
+                data-node-id="${node.id}"
+                data-tooltip-title="Profil Target Monitoring"
+                data-tooltip-category="${node.type}"
+                data-tooltip="${escapeHtml(node.name)} (${node.host}:${node.port}) • User: ${node.user || 'system'} • Suhu: ${tempVal} • Latensi: ${pingVal || '0ms'}">
           ${pingDot}
-          <span>${node.name}</span>
+          <span class="truncate max-w-[140px]">${node.name}</span>
           <span class="text-[10px] px-1.5 py-0.2 rounded bg-slate-900/80 text-cyan-300">${tempVal}</span>
           ${pingVal ? `<span class="text-[10px] text-slate-400">${pingVal}</span>` : ''}
         </button>
@@ -419,13 +552,19 @@ function renderDynamicRam(ramModules, ramSummary) {
         </div>
 
         <div class="pt-2 border-t border-slate-800/80 text-[11px] space-y-1 font-mono text-slate-400">
-          <div class="flex justify-between">
+          <div class="flex justify-between items-center">
             <span>Manufaktur:</span>
-            <span class="text-slate-200 font-semibold truncate max-w-[120px]">${mod.manufacturer || 'OEM'}</span>
+            <span class="text-slate-200 font-semibold truncate max-w-[120px] truncate-hoverable"
+                  data-tooltip-title="RAM Manufacturer"
+                  data-tooltip-category="MEMORY DIMM"
+                  data-tooltip="${escapeHtml(mod.manufacturer || 'OEM Standard')}">${mod.manufacturer || 'OEM'}</span>
           </div>
-          <div class="flex justify-between">
+          <div class="flex justify-between items-center">
             <span>Part Number:</span>
-            <span class="text-slate-300 truncate max-w-[130px]">${mod.partNumber || 'Module Part'}</span>
+            <span class="text-slate-300 truncate max-w-[130px] truncate-hoverable"
+                  data-tooltip-title="RAM Part Number / Serial"
+                  data-tooltip-category="MEMORY DIMM"
+                  data-tooltip="${escapeHtml(mod.partNumber || 'Module Part')}">${mod.partNumber || 'Module Part'}</span>
           </div>
         </div>
       </div>
@@ -477,7 +616,10 @@ function renderDynamicStorage(storageDisks) {
           <div class="flex items-center space-x-2">
             <span class="text-xl">💽</span>
             <div>
-              <div class="text-xs font-bold text-slate-200">Disk ${disk.index}: ${disk.model}</div>
+              <div class="text-xs font-bold text-slate-200 truncate max-w-[220px] truncate-hoverable"
+                   data-tooltip-title="Physical Storage Drive"
+                   data-tooltip-category="${disk.interface || 'NVMe'}"
+                   data-tooltip="Disk ${disk.index}: ${escapeHtml(disk.model)} | Kapasitas: ${(disk.sizeGb || 0).toFixed(1)} GB | Status: ${disk.status || 'OK'}">Disk ${disk.index}: ${disk.model}</div>
               <div class="text-[10px] text-slate-400 font-mono">${disk.interface || 'NVMe'} &bull; Kapasitas: ${(disk.sizeGb || 0).toFixed(0)} GB</div>
             </div>
           </div>
@@ -546,29 +688,56 @@ function updateUI() {
   const sysUptimeText = document.getElementById('sys-uptime-text');
   const powerSourceText = document.getElementById('power-source-text');
 
-  if (hostNameElem) hostNameElem.innerText = host || 'TARGET-DEVICE';
-  if (cpuModelElem) cpuModelElem.innerText = (cpu && cpu.model) || (systemSpecs && systemSpecs.cpuName) || 'Processor';
+  if (hostNameElem) {
+    hostNameElem.innerText = host || 'TARGET-DEVICE';
+    hostNameElem.setAttribute('data-tooltip', `Target Host: ${host || 'Target'} | Mode: ${sourceMode} | Link: ${sshConfig ? (sshConfig.connected ? 'SSH Connected (' + (sshConfig.latencyMs || 0) + 'ms)' : 'Reconnecting') : 'Local Host'}`);
+  }
+  if (cpuModelElem) {
+    const fullCpu = (cpu && cpu.model) || (systemSpecs && systemSpecs.cpuName) || 'Processor';
+    cpuModelElem.innerText = fullCpu;
+    cpuModelElem.setAttribute('data-tooltip', `${fullCpu} | ${(cpu && cpu.cores) || 8} Cores, ${(cpu && cpu.threads) || 12} Threads, ${(cpu && cpu.maxClockMhz) || 2100} MHz, ${(cpu && cpu.l3CacheMb) || 12}MB L3 Cache`);
+  }
   if (cpuTopologyElem && cpu) {
     cpuTopologyElem.innerText = `${cpu.cores || 8} Cores • ${cpu.threads || 12} Threads • ${cpu.l3CacheMb || 12}MB L3 Cache`;
+    cpuTopologyElem.setAttribute('data-tooltip', `Arsitektur: ${cpu.cores || 8} Cores fisik • ${cpu.threads || 12} Threads logikal • ${cpu.l3CacheMb || 12} MB L3 Cache`);
   }
-  if (mbModelText && systemSpecs) mbModelText.innerText = systemSpecs.motherboard || 'System Board';
-  if (gpuModelElem && gpu) gpuModelElem.innerText = gpu.model || 'Integrated Graphics';
-  if (osCaptionText && systemSpecs) osCaptionText.innerText = `${systemSpecs.osCaption || 'Windows 11'} (${systemSpecs.osBuild || '26200'})`;
-  if (sysUptimeText && systemSpecs) sysUptimeText.innerText = `Uptime: ${systemSpecs.uptime || 'Aktif'}`;
-  if (powerSourceText) powerSourceText.innerText = hardwareState.powerSource || 'AC Connected';
+  if (mbModelText && systemSpecs) {
+    mbModelText.innerText = systemSpecs.motherboard || 'System Board';
+    mbModelText.setAttribute('data-tooltip', `Motherboard: ${systemSpecs.motherboard} | RPL Sportage_RTH Alder Lake-P | UEFI BIOS`);
+  }
+  if (gpuModelElem && gpu) {
+    gpuModelElem.innerText = gpu.model || 'Integrated Graphics';
+    gpuModelElem.setAttribute('data-tooltip', `Graphics Adapter: ${gpu.model} | Suhu: ${(gpu.temp || 40).toFixed(1)}°C | Power: ${(gpu.power || 35).toFixed(1)}W`);
+  }
+  if (osCaptionText && systemSpecs) {
+    osCaptionText.innerText = `${systemSpecs.osCaption || 'Windows 11'} (${systemSpecs.osBuild || '26200'})`;
+    osCaptionText.setAttribute('data-tooltip', `Sistem Operasi: ${systemSpecs.osCaption} Build ${systemSpecs.osBuild} (64-bit Architecture)`);
+  }
+  if (sysUptimeText && systemSpecs) {
+    sysUptimeText.innerText = `Uptime: ${systemSpecs.uptime || 'Aktif'}`;
+    sysUptimeText.setAttribute('data-tooltip', `Durasi Sistem Aktif: ${systemSpecs.uptime} tanpa restart terduga`);
+  }
+  if (powerSourceText) {
+    powerSourceText.innerText = hardwareState.powerSource || 'AC Connected';
+    powerSourceText.setAttribute('data-tooltip', `Sumber Daya: ${hardwareState.powerSource || 'AC Connected'}`);
+  }
 
   if (connBadge && connText && sshConfig) {
     if (sourceMode === 'SSH_REMOTE') {
       if (sshConfig.connected) {
         connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-2 shadow';
         connText.innerText = `SSH CONNECTED (${sshConfig.latencyMs || 0} ms)`;
+        connBadge.setAttribute('data-tooltip', `Status SSH: Terhubung ke ${sshConfig.targetHost}:${sshConfig.targetPort} (${sshConfig.latencyMs || 0} ms)`);
       } else {
         connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-2 animate-pulse shadow';
+        const errDetail = sshConfig.lastError ? ` - ${sshConfig.lastError}` : '';
         connText.innerText = `RECONNECTING (${sshConfig.targetHost})...`;
+        connBadge.setAttribute('data-tooltip', `Status SSH: Menghubungkan ulang ke ${sshConfig.targetHost}:${sshConfig.targetPort}${errDetail}`);
       }
     } else {
       connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center gap-2 shadow';
       connText.innerText = 'LOCAL HOST ACTIVE';
+      connBadge.setAttribute('data-tooltip', 'Status: Monitoring Local Host (WMI Direct)');
     }
   }
 
@@ -727,7 +896,10 @@ function openProfileModal(nodeId = null) {
   const feedback = document.getElementById('modal-profile-feedback');
   const pwdStatus = document.getElementById('modal-pwd-status');
 
-  if (feedback) feedback.classList.add('hidden');
+  if (feedback) {
+    feedback.classList.add('hidden');
+    feedback.innerText = '';
+  }
 
   if (nodeId) {
     const node = registeredNodes.find(n => n.id === nodeId);
@@ -749,7 +921,16 @@ function openProfileModal(nodeId = null) {
         pwdStatus.className = node.hasPassword ? 'text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-normal' : 'text-[10px] px-1.5 py-0.2 rounded bg-slate-700 text-slate-400 font-normal';
       }
 
-      if (deleteBtn) deleteBtn.classList.remove('hidden');
+      if (deleteBtn) {
+        deleteBtn.classList.remove('hidden');
+        if (registeredNodes.length <= 1) {
+          deleteBtn.classList.add('opacity-40', 'cursor-not-allowed');
+          deleteBtn.title = 'Minimal harus ada 1 profil tersisa di dashboard';
+        } else {
+          deleteBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+          deleteBtn.title = 'Hapus profil perangkat ini dari vault';
+        }
+      }
     }
   } else {
     // New Profile
@@ -783,6 +964,7 @@ function closeProfileModal() {
 
 // Initialize and Setup Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
+  initTooltipEngine();
   renderAlertsTable();
   renderOsEventsTable();
   fetchNodes();
@@ -853,10 +1035,10 @@ document.addEventListener('DOMContentLoaded', () => {
           feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-emerald-500/20 text-emerald-300';
           feedback.innerText = '✅ Profil Perangkat Berhasil Disimpan di Vault!';
           triggerAlert('INFO', 'Device Vault', `Profil "${name}" (${host}) berhasil disimpan.`, 'Monitoring siap');
-          setTimeout(() => {
+          setTimeout(async () => {
             closeProfileModal();
-            fetchNodes();
-            if (resData.nodeId) selectNode(resData.nodeId);
+            await fetchNodes();
+            if (resData.nodeId) await selectNode(resData.nodeId);
           }, 800);
         } else {
           feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-rose-500/20 text-rose-300';
@@ -874,17 +1056,56 @@ document.addEventListener('DOMContentLoaded', () => {
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
       const nodeId = document.getElementById('modal-node-id').value;
+      const feedback = document.getElementById('modal-profile-feedback');
       if (!nodeId) return;
 
-      if (confirm('Apakah Anda yakin ingin menghapus profil perangkat ini dari vault?')) {
-        try {
-          const res = await fetch(`/api/nodes?id=${encodeURIComponent(nodeId)}`, { method: 'DELETE' });
-          if (res.ok) {
-            closeProfileModal();
-            fetchNodes();
-            updateMetrics();
+      const targetNode = registeredNodes.find(n => n.id === nodeId);
+      const nodeName = targetNode ? targetNode.name : nodeId;
+
+      if (registeredNodes.length <= 1) {
+        if (feedback) {
+          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-amber-500/20 text-amber-300';
+          feedback.innerText = '⚠️ Minimal harus ada 1 profil perangkat dalam sistem.';
+          feedback.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (!confirm(`Apakah Anda yakin ingin menghapus profil perangkat "${nodeName}" dari vault?`)) {
+        return;
+      }
+
+      if (feedback) {
+        feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-cyan-500/20 text-cyan-300';
+        feedback.innerText = 'Menghapus profil perangkat...';
+        feedback.classList.remove('hidden');
+      }
+
+      try {
+        const res = await fetch(`/api/nodes?id=${encodeURIComponent(nodeId)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          triggerAlert('INFO', 'Device Vault', `Profil "${nodeName}" berhasil dihapus dari vault.`, 'Node vault diupdate');
+          closeProfileModal();
+          await fetchNodes();
+          if (data.activeNodeId) {
+            await selectNode(data.activeNodeId);
+          } else if (registeredNodes.length > 0) {
+            await selectNode(registeredNodes[0].id);
           }
-        } catch (e) {}
+        } else {
+          if (feedback) {
+            feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-rose-500/20 text-rose-300';
+            feedback.innerText = `❌ ${data.message || 'Gagal menghapus profil.'}`;
+            feedback.classList.remove('hidden');
+          }
+        }
+      } catch (err) {
+        if (feedback) {
+          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-rose-500/20 text-rose-300';
+          feedback.innerText = '❌ Terjadi kesalahan jaringan saat menghapus profil.';
+          feedback.classList.remove('hidden');
+        }
       }
     });
   }

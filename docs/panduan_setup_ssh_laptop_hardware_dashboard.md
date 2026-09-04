@@ -46,6 +46,22 @@ Pilih sesuai sistem operasi yang berjalan pada laptop target Anda:
 
 ### B. Jika Laptop Target Menggunakan Windows 10 / 11
 
+#### Cara Praktis (1-Click Automation):
+1. Salin file script **`scripts/setup_target_ssh_1click.bat`** ke komputer/laptop target.
+2. Klik kanan file `setup_target_ssh_1click.bat` -> pilih **"Run as Administrator"**.
+3. Tekan Enter untuk port default 22 (atau masukkan port custom jika diinginkan).
+4. Script akan otomatis:
+   - Mengatasi isu WSUS / 0x80072efd jika Windows Update dikunci.
+   - Mengunduh & memasang OpenSSH Server secara otomatis.
+   - Memastikan Host Keys ter-generate (`ssh-keygen -A`) dan memperbaiki izin keamanan file (ACL).
+   - Membuka firewall Windows & mengaktifkan service `sshd` ke mode *Automatic*.
+5. Di akhir proses, script akan langsung menampilkan alamat IP, username, dan port siap pakai.
+
+*(Catatan: Jika ingin menghapus OpenSSH secara total, jalankan script **`scripts/uninstall_target_ssh_1click.bat`**)*.
+
+---
+
+#### Cara Manual (via PowerShell Administrator):
 1. Buka **PowerShell as Administrator** di laptop target.
 2. Jalankan perintah instalasi OpenSSH Server bawaan Windows:
    ```powershell
