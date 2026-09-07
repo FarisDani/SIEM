@@ -8,10 +8,10 @@ let streamActive = true;
 let streamInterval = null;
 let activeAlertFilter = 'ALL';
 let activeEventFilter = 'ALL';
-let activeLogTab = 'ALERTS';
+let activeLogTab = 'EVENTS';
 let simulationMode = 'NORMAL';
 
-let activeNodeId = 'node_laptop_acer';
+let activeNodeId = 'node_f93896f4';
 let registeredNodes = [];
 let alertLogs = [];
 const maxLogCount = 100;
@@ -95,79 +95,43 @@ function closeSshTroubleshootModal() {
 // Hardware State Snapshot
 let hardwareState = {
   nodeId: 'node_laptop_acer',
-  nodeName: 'Laptop Acer Nitro i5',
+  nodeName: 'Target Device',
   sourceMode: 'SSH_REMOTE',
   sshConfig: {
-    targetHost: '172.16.4.205',
-    targetUser: 'laptop-69pj06ep\\acer',
+    targetHost: '',
+    targetUser: '',
     targetPort: 22,
-    hasPassword: true,
+    hasPassword: false,
     connected: false,
     latencyMs: 0
   },
-  host: 'LAPTOP-69PJ06EP',
-  powerSource: 'Laptop Battery (100%) / AC Power',
-  cpu: {
-    model: '13th Gen Intel(R) Core(TM) i5-13420H',
-    cores: 8,
-    threads: 12,
-    maxClockMhz: 2100,
-    l3CacheMb: 12,
-    temp: 48.5,
-    maxTemp: 100.0,
-    throttling: false,
-    vcore: 1.15,
-    power: 42.5
-  },
-  gpu: {
-    model: 'Intel(R) UHD Graphics / Dedicated GPU',
-    temp: 42.0,
-    hotspotTemp: 48.2,
-    power: 38.5,
-    fanRpm: 1850,
-    fanPwm: 52
-  },
-  storage: { temp: 38.0, health: '100% Good', activity: 12.4 },
-  motherboard: { temp: 35.0, vrmTemp: 41.5, ambientTemp: 29.0 },
-  ramSummary: { totalGb: 23.7, usedGb: 7.1, freeGb: 16.6, usedPct: 30.0 },
+  host: '—',
+  powerSource: '—',
+  cpu: null,
+  gpu: null,
+  storage: null,
+  motherboard: null,
+  ramSummary: null,
   ramModules: [],
   storageDisks: [],
   systemSpecs: {
-    cpuName: '13th Gen Intel(R) Core(TM) i5-13420H',
-    cores: 8,
-    threads: 12,
-    maxClockMhz: 2100,
-    l3CacheMb: 12,
-    motherboard: 'Acer / RPL Sportage_RTH',
-    osCaption: 'Microsoft Windows 11',
-    osBuild: '26200',
-    uptime: 'Aktif'
+    cpuName: null,
+    cores: null,
+    threads: null,
+    maxClockMhz: null,
+    l3CacheMb: null,
+    motherboard: null,
+    osCaption: null,
+    osBuild: null,
+    uptime: null
   },
   osEventLogs: [],
-  fans: {
-    cpu: { rpm: 2150, pwm: 58, stall: false },
-    gpu: { rpm: 1850, pwm: 52, stall: false },
-    case: { rpm: 0, pwm: 0, stall: false }
-  },
-  voltages: {
-    v12: 17.58,
-    v5: 5.01,
-    v33: 3.31,
-    vcore: 1.15,
-    totalPower: 42.5
-  }
+  fans: null,
+  voltages: null
 };
 
 // Initial Sample Alert Logs
-const initialAlerts = [
-  {
-    timestamp: new Date().toLocaleTimeString(),
-    severity: 'INFO',
-    component: 'NOC Controller',
-    message: 'Multi-Device Concurrent Monitoring Gateway aktif.',
-    action: 'Semua target standby'
-  }
-];
+const initialAlerts = [];
 alertLogs = [...initialAlerts];
 
 // Helper: Escape HTML string safely
@@ -605,6 +569,189 @@ async function fetchNodes() {
   }
 }
 
+// Generic 60 FPS HTML5 Canvas Sparkline/Area Chart Renderer
+function drawCyberSparkline(canvasId, dataPoints, strokeColor, fillColor, minVal = 0, maxVal = 100, unit = '%') {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+
+  if (canvas.width !== Math.floor(rect.width * dpr) || canvas.height !== Math.floor(rect.height * dpr)) {
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+  }
+  ctx.save();
+  ctx.scale(dpr, dpr);
+
+  const w = rect.width;
+  const h = rect.height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  if (!dataPoints || dataPoints.length === 0) {
+    ctx.restore();
+    return;
+  }
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(51, 65, 85, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 4]);
+
+  ctx.beginPath();
+  ctx.moveTo(0, h * 0.5);
+  ctx.lineTo(w, h * 0.5);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Calculate coordinates
+  const points = [];
+  const range = maxVal - minVal || 1;
+  const step = w / Math.max(1, dataPoints.length - 1);
+
+  dataPoints.forEach((val, i) => {
+    const clamped = Math.max(minVal, Math.min(maxVal, val));
+    const norm = (clamped - minVal) / range;
+    const x = i * step;
+    const y = h - (norm * (h - 14)) - 7;
+    points.push({ x, y, val });
+  });
+
+  // Area Fill
+  if (fillColor && points.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, h);
+    points.forEach((p, i) => {
+      if (i === 0) ctx.lineTo(p.x, p.y);
+      else {
+        const prev = points[i - 1];
+        const cx = (prev.x + p.x) / 2;
+        ctx.bezierCurveTo(cx, prev.y, cx, p.y, p.x, p.y);
+      }
+    });
+    ctx.lineTo(points[points.length - 1].x, h);
+    ctx.closePath();
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, h);
+    gradient.addColorStop(0, fillColor);
+    gradient.addColorStop(1, 'rgba(15, 23, 42, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fill();
+  }
+
+  // Stroke Line
+  if (points.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    points.forEach((p, i) => {
+      if (i > 0) {
+        const prev = points[i - 1];
+        const cx = (prev.x + p.x) / 2;
+        ctx.bezierCurveTo(cx, prev.y, cx, p.y, p.x, p.y);
+      }
+    });
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = strokeColor;
+    ctx.shadowBlur = 6;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  // Glowing dot on latest point
+  if (points.length > 0) {
+    const last = points[points.length - 1];
+    ctx.beginPath();
+    ctx.arc(last.x, last.y, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = strokeColor;
+    ctx.shadowColor = strokeColor;
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.restore();
+}
+
+// Render Real-Time Timeseries Performance Graphs
+function renderTimeseriesCharts(timeseries, hardwareState) {
+  if (!timeseries) return;
+
+  const cpuData = timeseries.cpu && timeseries.cpu.length > 0 ? timeseries.cpu : [14];
+  const ramData = timeseries.ram && timeseries.ram.length > 0 ? timeseries.ram : [38.7];
+  const diskData = timeseries.disk && timeseries.disk.length > 0 ? timeseries.disk : [12.4];
+  const netRxData = timeseries.net_rx && timeseries.net_rx.length > 0 ? timeseries.net_rx : [145];
+  const netTxData = timeseries.net_tx && timeseries.net_tx.length > 0 ? timeseries.net_tx : [42];
+
+  // 1. CPU Load
+  const latestCpu = cpuData[cpuData.length - 1] || 0;
+  const cpuMin = Math.min(...cpuData);
+  const cpuAvg = Math.round(cpuData.reduce((a, b) => a + b, 0) / cpuData.length);
+  const cpuMax = Math.max(...cpuData);
+
+  const cpuBadge = document.getElementById('trend-cpu-badge');
+  const statCpuMin = document.getElementById('stat-cpu-min');
+  const statCpuAvg = document.getElementById('stat-cpu-avg');
+  const statCpuMax = document.getElementById('stat-cpu-max');
+
+  if (cpuBadge) cpuBadge.innerText = `${latestCpu.toFixed(1)}%`;
+  if (statCpuMin) statCpuMin.innerText = `${cpuMin.toFixed(0)}%`;
+  if (statCpuAvg) statCpuAvg.innerText = `${cpuAvg.toFixed(0)}%`;
+  if (statCpuMax) statCpuMax.innerText = `${cpuMax.toFixed(0)}%`;
+
+  drawCyberSparkline('chart-cpu', cpuData, '#22d3ee', 'rgba(34, 211, 238, 0.3)', 0, 100, '%');
+
+  // 2. RAM Usage
+  const latestRam = ramData[ramData.length - 1] || 0;
+  const ramSummary = hardwareState.ramSummary;
+  const ramBadge = document.getElementById('trend-ram-badge');
+  const statRamUsed = document.getElementById('stat-ram-used');
+  const statRamTotal = document.getElementById('stat-ram-total');
+
+  if (ramBadge) ramBadge.innerText = `${latestRam.toFixed(1)}%`;
+  if (statRamUsed) statRamUsed.innerText = (ramSummary && ramSummary.usedGb != null) ? `${ramSummary.usedGb.toFixed(1)} GB` : '—';
+  if (statRamTotal) statRamTotal.innerText = (ramSummary && ramSummary.totalGb != null) ? `${ramSummary.totalGb.toFixed(1)} GB` : '—';
+
+  drawCyberSparkline('chart-ram', ramData, '#10b981', 'rgba(16, 185, 129, 0.3)', 0, 100, '%');
+
+  // 3. Disk Activity
+  const latestDisk = diskData[diskData.length - 1] || 0;
+  const diskMax = Math.max(25, Math.ceil(Math.max(...diskData) * 1.2));
+  const diskBadge = document.getElementById('trend-disk-badge');
+  const statDiskRate = document.getElementById('stat-disk-rate');
+
+  if (diskBadge) diskBadge.innerText = `${latestDisk.toFixed(1)} MB/s`;
+  if (statDiskRate) statDiskRate.innerText = `${latestDisk.toFixed(1)} MB/s`;
+
+  drawCyberSparkline('chart-disk', diskData, '#c084fc', 'rgba(192, 132, 252, 0.3)', 0, diskMax, 'MB/s');
+
+  // 4. Network Bandwidth
+  const latestRx = netRxData[netRxData.length - 1] || 0;
+  const latestTx = netTxData[netTxData.length - 1] || 0;
+  const netMax = Math.max(100, Math.ceil(Math.max(...netRxData, ...netTxData) * 1.2));
+  const netBadge = document.getElementById('trend-net-badge');
+  const statNetRx = document.getElementById('stat-net-rx');
+  const statNetTx = document.getElementById('stat-net-tx');
+
+  if (netBadge) netBadge.innerText = `↓ ${latestRx.toFixed(0)} KB/s`;
+  if (statNetRx) statNetRx.innerText = `${latestRx.toFixed(0)} KB/s`;
+  if (statNetTx) statNetTx.innerText = `${latestTx.toFixed(0)} KB/s`;
+
+  drawCyberSparkline('chart-network', netRxData, '#06b6d4', 'rgba(6, 182, 212, 0.25)', 0, netMax, 'KB/s');
+
+  // Synchronize Top Executive Quick Pulse Bar
+  const pulseCpu = document.getElementById('pulse-cpu-val');
+  const pulseRam = document.getElementById('pulse-ram-val');
+  const pulseDisk = document.getElementById('pulse-disk-val');
+  const pulseNet = document.getElementById('pulse-net-val');
+
+  if (pulseCpu) pulseCpu.innerText = `${latestCpu.toFixed(1)}%`;
+  if (pulseRam) pulseRam.innerText = `${latestRam.toFixed(1)}%`;
+  if (pulseDisk) pulseDisk.innerText = `${latestDisk.toFixed(1)} MB/s`;
+  if (pulseNet) pulseNet.innerText = `↓ ${latestRx.toFixed(0)} KB/s`;
+}
+
 // Render Dynamic RAM Modules Cards
 function renderDynamicRam(ramModules, ramSummary) {
   const container = document.getElementById('dynamic-ram-container');
@@ -613,24 +760,28 @@ function renderDynamicRam(ramModules, ramSummary) {
   const ramBarText = document.getElementById('ram-bar-text');
   const ramUsageBar = document.getElementById('ram-usage-bar');
 
-  if (ramSummary) {
-    const totalGb = ramSummary.totalGb || 23.7;
-    const usedGb = ramSummary.usedGb || 7.1;
-    const freeGb = ramSummary.freeGb || 16.6;
-    const usedPct = ramSummary.usedPct || 30.0;
+  if (ramSummary && ramSummary.totalGb > 0) {
+    const totalGb = ramSummary.totalGb;
+    const usedGb = ramSummary.usedGb;
+    const freeGb = ramSummary.freeGb;
+    const usedPct = ramSummary.usedPct;
 
     if (ramTotalBadge) ramTotalBadge.innerText = `${totalGb.toFixed(1)} GB`;
     if (ramUsedBadge) ramUsedBadge.innerText = `${usedGb.toFixed(1)} GB (${usedPct.toFixed(0)}%)`;
     if (ramBarText) ramBarText.innerText = `${usedGb.toFixed(1)} GB / ${totalGb.toFixed(1)} GB Used (${freeGb.toFixed(1)} GB Free)`;
     if (ramUsageBar) ramUsageBar.style.width = `${Math.min(100, Math.max(5, usedPct))}%`;
+  } else {
+    if (ramTotalBadge) ramTotalBadge.innerHTML = `<span class="text-rose-400">⚠️ —</span>`;
+    if (ramUsedBadge) ramUsedBadge.innerHTML = `<span class="text-rose-400">⚠️ Tidak Terdeteksi</span>`;
+    if (ramBarText) ramBarText.innerHTML = `<span class="text-rose-400">⚠️ Data RAM Tidak Terbaca</span>`;
   }
 
   if (!container) return;
 
   if (!ramModules || ramModules.length === 0) {
     container.innerHTML = `
-      <div class="col-span-full p-4 rounded-xl bg-slate-900/40 text-center text-xs text-slate-500 font-mono">
-        Mendeteksi modul RAM fisik dari target...
+      <div class="col-span-full p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-center text-xs font-mono font-bold">
+        ⚠️ Data Modul RAM Fisik Tidak Terdeteksi via SSH
       </div>
     `;
     return;
@@ -648,16 +799,16 @@ function renderDynamicRam(ramModules, ramSummary) {
             </div>
           </div>
           <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-            ${mod.type || 'DDR5'}
+            ${mod.type || 'RAM'}
           </span>
         </div>
 
         <div class="py-1">
           <div class="text-2xl font-mono font-black text-cyan-300">
-            ${(mod.capacityGb || 8.0).toFixed(1)} <span class="text-xs text-slate-400 font-sans">GB</span>
+            ${(mod.capacityGb != null ? mod.capacityGb : 0).toFixed(1)} <span class="text-xs text-slate-400 font-sans">GB</span>
           </div>
           <div class="text-[11px] font-mono text-emerald-400 font-semibold">
-            ⚡ ${mod.speedMhz || 4800} MT/s (MHz)
+            ⚡ ${mod.speedMhz || '—'} MT/s (MHz)
           </div>
         </div>
 
@@ -689,8 +840,8 @@ function renderDynamicStorage(storageDisks) {
 
   if (!storageDisks || storageDisks.length === 0) {
     container.innerHTML = `
-      <div class="col-span-full p-4 rounded-xl bg-slate-900/40 text-center text-xs text-slate-500 font-mono">
-        Mendeteksi unit penyimpanan fisik & partisi...
+      <div class="col-span-full p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-center text-xs font-mono font-bold">
+        ⚠️ Unit Penyimpanan Fisik & Partisi Tidak Terdeteksi via SSH
       </div>
     `;
     return;
@@ -784,7 +935,10 @@ function evaluateHardwareRules() {
 
 // Update UI
 function updateUI() {
-  const { cpu, gpu, storage, motherboard, fans, voltages, host, sourceMode, sshConfig, ramSummary, ramModules, storageDisks, systemSpecs } = hardwareState;
+  const { cpu, gpu, storage, motherboard, fans, voltages, host, sourceMode, sshConfig, ramSummary, ramModules, storageDisks, systemSpecs, timeseries } = hardwareState;
+
+  // Render Real-Time Timeseries Performance Graphs
+  renderTimeseriesCharts(timeseries, hardwareState);
 
   // Connection Badge
   const connBadge = document.getElementById('connection-badge');
@@ -803,33 +957,120 @@ function updateUI() {
     hostNameElem.setAttribute('data-tooltip', `Target Host: ${host || 'Target'} | Mode: ${sourceMode} | Link: ${sshConfig ? (sshConfig.connected ? 'SSH Connected (' + (sshConfig.latencyMs || 0) + 'ms)' : 'Reconnecting') : 'Local Host'}`);
   }
   if (cpuModelElem) {
-    const fullCpu = (cpu && cpu.model) || (systemSpecs && systemSpecs.cpuName) || 'Processor';
-    cpuModelElem.innerText = fullCpu;
-    cpuModelElem.setAttribute('data-tooltip', `${fullCpu} | ${(cpu && cpu.cores) || 8} Cores, ${(cpu && cpu.threads) || 12} Threads, ${(cpu && cpu.maxClockMhz) || 2100} MHz, ${(cpu && cpu.l3CacheMb) || 12}MB L3 Cache`);
+    const fullCpu = (cpu && cpu.model) || (systemSpecs && systemSpecs.cpuName);
+    if (fullCpu) {
+      cpuModelElem.innerHTML = escapeHtml(fullCpu);
+      cpuModelElem.setAttribute('data-tooltip', `${fullCpu} | ${(cpu && cpu.cores) || '—'} Cores, ${(cpu && cpu.threads) || '—'} Threads, ${(cpu && cpu.maxClockMhz) || '—'} MHz`);
+    } else {
+      cpuModelElem.innerHTML = `<span class="text-rose-400 font-mono font-bold text-[11px]">⚠️ CPU Tidak Terdeteksi</span>`;
+    }
   }
-  if (cpuTopologyElem && cpu) {
-    cpuTopologyElem.innerText = `${cpu.cores || 8} Cores • ${cpu.threads || 12} Threads • ${cpu.l3CacheMb || 12}MB L3 Cache`;
-    cpuTopologyElem.setAttribute('data-tooltip', `Arsitektur: ${cpu.cores || 8} Cores fisik • ${cpu.threads || 12} Threads logikal • ${cpu.l3CacheMb || 12} MB L3 Cache`);
+  if (cpuTopologyElem) {
+    if (cpu && cpu.cores && cpu.threads) {
+      cpuTopologyElem.innerHTML = `${cpu.cores} Cores &bull; ${cpu.threads} Threads &bull; ${cpu.l3CacheMb ? cpu.l3CacheMb + 'MB L3' : 'L3 Cache'}`;
+      cpuTopologyElem.setAttribute('data-tooltip', `Arsitektur: ${cpu.cores} Cores fisik &bull; ${cpu.threads} Threads logikal`);
+    } else {
+      cpuTopologyElem.innerHTML = `<span class="text-slate-400 font-mono text-[10px]">Arsitektur Prosesor</span>`;
+    }
   }
-  if (mbModelText && systemSpecs) {
-    mbModelText.innerText = systemSpecs.motherboard || 'System Board';
-    mbModelText.setAttribute('data-tooltip', `Motherboard: ${systemSpecs.motherboard} | RPL Sportage_RTH Alder Lake-P | UEFI BIOS`);
+  if (mbModelText) {
+    const mb = systemSpecs && systemSpecs.motherboard;
+    if (mb) {
+      mbModelText.innerHTML = escapeHtml(mb);
+      mbModelText.setAttribute('data-tooltip', `Motherboard: ${mb} | UEFI Firmware Architecture`);
+    } else {
+      mbModelText.innerHTML = `<span class="text-rose-400 font-mono font-bold text-[11px]">⚠️ Motherboard Tidak Terdeteksi</span>`;
+    }
   }
-  if (gpuModelElem && gpu) {
-    gpuModelElem.innerText = gpu.model || 'Integrated Graphics';
-    gpuModelElem.setAttribute('data-tooltip', `Graphics Adapter: ${gpu.model} | Suhu: ${(gpu.temp || 40).toFixed(1)}°C | Power: ${(gpu.power || 35).toFixed(1)}W`);
+  if (gpuModelElem) {
+    const gpuName = gpu && gpu.model;
+    if (gpuName) {
+      gpuModelElem.innerHTML = escapeHtml(gpuName);
+      const vramStr = gpu.vramGb ? ` | VRAM: ${gpu.vramGb} GB Dedicated` : '';
+      gpuModelElem.setAttribute('data-tooltip', `Graphics Adapter: ${gpuName} | Suhu: ${(gpu.temp || 40).toFixed(1)}°C | Power: ${(gpu.power || 35).toFixed(1)}W${vramStr}`);
+    } else {
+      gpuModelElem.innerHTML = `<span class="text-rose-400 font-mono font-bold text-[11px]">⚠️ GPU Tidak Terdeteksi</span>`;
+    }
+
+    const gpuAdapterType = document.getElementById('gpu-adapter-type');
+    const gpuVramText = document.getElementById('gpu-vram-text');
+    if (gpuAdapterType) {
+      if (gpu && gpu.isDiscrete) {
+        gpuAdapterType.innerText = 'Dedicated PCIe Graphics';
+      } else if (gpu && gpu.is_igpu) {
+        gpuAdapterType.innerText = 'Integrated Graphics (iGPU)';
+      } else if (gpuName) {
+        gpuAdapterType.innerText = 'PCIe / Direct Adapter';
+      }
+    }
+    if (gpuVramText) {
+      if (gpu && gpu.vramGb > 0) {
+        gpuVramText.innerText = `${gpu.vramGb} GB Dedicated`;
+      } else {
+        gpuVramText.innerText = 'Shared System Memory';
+      }
+    }
   }
-  if (osCaptionText && systemSpecs) {
-    osCaptionText.innerText = `${systemSpecs.osCaption || 'Windows 11'} (${systemSpecs.osBuild || '26200'})`;
-    osCaptionText.setAttribute('data-tooltip', `Sistem Operasi: ${systemSpecs.osCaption} Build ${systemSpecs.osBuild} (64-bit Architecture)`);
+  if (osCaptionText) {
+    const osCap = systemSpecs && systemSpecs.osCaption;
+    if (osCap) {
+      osCaptionText.innerHTML = escapeHtml(osCap);
+      osCaptionText.setAttribute('data-tooltip', `Sistem Operasi: ${osCap} (64-bit Architecture)`);
+    } else {
+      osCaptionText.innerHTML = `<span class="text-rose-400 font-mono font-bold text-[11px]">⚠️ OS Tidak Terdeteksi</span>`;
+    }
   }
-  if (sysUptimeText && systemSpecs) {
-    sysUptimeText.innerText = `Uptime: ${systemSpecs.uptime || 'Aktif'}`;
-    sysUptimeText.setAttribute('data-tooltip', `Durasi Sistem Aktif: ${systemSpecs.uptime} tanpa restart terduga`);
+  if (sysUptimeText) {
+    const up = systemSpecs && systemSpecs.uptime;
+    if (up) {
+      sysUptimeText.innerHTML = `⏱️ Uptime: ${escapeHtml(up)}`;
+      sysUptimeText.setAttribute('data-tooltip', `Durasi Sistem Aktif: ${up} tanpa restart`);
+    } else {
+      sysUptimeText.innerHTML = `<span class="text-rose-400 font-mono font-bold text-[10px]">⚠️ Uptime Tidak Terbaca</span>`;
+    }
   }
   if (powerSourceText) {
     powerSourceText.innerText = hardwareState.powerSource || 'AC Connected';
     powerSourceText.setAttribute('data-tooltip', `Sumber Daya: ${hardwareState.powerSource || 'AC Connected'}`);
+  }
+
+  // Quick Executive Pulse Metrics Bar (Top Section 0)
+  const pulseCpuVal = document.getElementById('pulse-cpu-val');
+  const pulseRamVal = document.getElementById('pulse-ram-val');
+  const pulseDiskVal = document.getElementById('pulse-disk-val');
+  const pulseNetVal = document.getElementById('pulse-net-val');
+  const globalHealthBadge = document.getElementById('global-health-badge');
+
+  if (pulseCpuVal) {
+    const cpuLoad = (cpu && cpu.loadPct != null) ? cpu.loadPct : 0;
+    pulseCpuVal.innerText = `${cpuLoad.toFixed(1)}%`;
+  }
+  if (pulseRamVal) {
+    const ramPct = (ramSummary && ramSummary.usedPct != null) ? ramSummary.usedPct : 0;
+    pulseRamVal.innerText = `${ramPct.toFixed(1)}%`;
+  }
+  if (pulseDiskVal) {
+    const stAct = (storage && storage.activity != null) ? storage.activity : 12.4;
+    pulseDiskVal.innerText = `${stAct.toFixed(1)} MB/s`;
+  }
+  if (pulseNetVal) {
+    const rx = (hardwareState.network && hardwareState.network.rxKbps != null) ? hardwareState.network.rxKbps : 0;
+    pulseNetVal.innerText = `↓ ${rx.toFixed(0)} KB/s`;
+  }
+  if (globalHealthBadge) {
+    if (cpu && cpu.temp >= 85) {
+      globalHealthBadge.className = 'px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse';
+      globalHealthBadge.innerText = 'CRITICAL THERMAL';
+    } else if (cpu && cpu.temp >= 75) {
+      globalHealthBadge.className = 'px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-amber-500/20 text-amber-400 border-amber-500/30';
+      globalHealthBadge.innerText = 'HIGH LOAD';
+    } else if (sourceMode === 'SSH_REMOTE' && sshConfig && !sshConfig.connected) {
+      globalHealthBadge.className = 'px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse';
+      globalHealthBadge.innerText = 'LINK DISCONNECTED';
+    } else {
+      globalHealthBadge.className = 'px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+      globalHealthBadge.innerText = 'SYSTEM OPTIMAL';
+    }
   }
 
   if (connBadge && connText && sshConfig) {
@@ -945,24 +1186,52 @@ function updateUI() {
     const gpuFanRpm = document.getElementById('gpu-fan-rpm');
     const gpuFanPwm = document.getElementById('gpu-fan-pwm');
     const gpuFanBar = document.getElementById('gpu-fan-bar');
+    const gpuFanIcon = document.getElementById('gpu-fan-icon');
+    const gpuFanSubtext = document.getElementById('gpu-fan-subtext');
     const caseFanRpm = document.getElementById('case-fan-rpm');
     const caseFanPwm = document.getElementById('case-fan-pwm');
     const caseFanBar = document.getElementById('case-fan-bar');
 
-    if (cpuFanRpm) cpuFanRpm.innerText = fans.cpu ? fans.cpu.rpm : 2150;
-    if (cpuFanPwm) cpuFanPwm.innerText = `${fans.cpu ? fans.cpu.pwm : 58}%`;
-    if (cpuFanBar) cpuFanBar.style.width = `${fans.cpu ? fans.cpu.pwm : 58}%`;
+    if (cpuFanRpm) cpuFanRpm.innerText = fans.cpu ? fans.cpu.rpm : '—';
+    if (cpuFanPwm) cpuFanPwm.innerText = `${fans.cpu ? fans.cpu.pwm : 0}%`;
+    if (cpuFanBar) cpuFanBar.style.width = `${fans.cpu ? fans.cpu.pwm : 0}%`;
 
-    if (gpuFanRpm) gpuFanRpm.innerText = fans.gpu ? fans.gpu.rpm : 1850;
-    if (gpuFanPwm) gpuFanPwm.innerText = `${fans.gpu ? fans.gpu.pwm : 52}%`;
-    if (gpuFanBar) gpuFanBar.style.width = `${fans.gpu ? fans.gpu.pwm : 52}%`;
+    if (gpuFanRpm) {
+      if (fans.gpu && (fans.gpu.is_igpu || fans.gpu.has_fan === false)) {
+        gpuFanRpm.innerHTML = `<span class="text-slate-400 font-bold text-xs">N/A</span> <span class="text-[10px] text-slate-500 font-mono font-normal">(iGPU / Fanless)</span>`;
+        if (gpuFanPwm) gpuFanPwm.innerText = `N/A`;
+        if (gpuFanBar) gpuFanBar.style.width = `0%`;
+        if (gpuFanIcon) gpuFanIcon.classList.remove('fan-icon-spin');
+        if (gpuFanSubtext) gpuFanSubtext.innerText = 'Integrated GPU (Fanless)';
+      } else if (fans.gpu && fans.gpu.rpm === 0) {
+        gpuFanRpm.innerHTML = `<span class="text-emerald-400 font-bold">0</span> <span class="text-[10px] text-emerald-400/80 font-mono font-normal">(0-dB Mode)</span>`;
+        if (gpuFanPwm) gpuFanPwm.innerText = `${fans.gpu.pwm || 0}%`;
+        if (gpuFanBar) gpuFanBar.style.width = `${fans.gpu.pwm || 0}%`;
+        if (gpuFanIcon) gpuFanIcon.classList.remove('fan-icon-spin');
+        if (gpuFanSubtext) gpuFanSubtext.innerText = 'Dedicated GPU Cooler';
+      } else {
+        gpuFanRpm.innerHTML = `<span class="text-emerald-300 font-bold">${fans.gpu ? fans.gpu.rpm : '—'}</span> <span class="text-xs text-slate-400 font-sans">RPM</span>`;
+        if (gpuFanPwm) gpuFanPwm.innerText = `${fans.gpu ? fans.gpu.pwm : 0}%`;
+        if (gpuFanBar) gpuFanBar.style.width = `${fans.gpu ? fans.gpu.pwm : 0}%`;
+        if (gpuFanIcon) gpuFanIcon.classList.add('fan-icon-spin');
+        if (gpuFanSubtext) gpuFanSubtext.innerText = 'Dedicated GPU Cooler';
+      }
+    }
 
-    if (caseFanRpm) caseFanRpm.innerText = fans.case ? fans.case.rpm : 0;
-    if (caseFanPwm) caseFanPwm.innerText = `${fans.case ? fans.case.pwm : 0}%`;
-    if (caseFanBar) caseFanBar.style.width = `${fans.case ? fans.case.pwm : 0}%`;
+    if (caseFanRpm) {
+      if (fans.case && (fans.case.has_fan === false || fans.case.rpm === 0)) {
+        caseFanRpm.innerHTML = `<span class="text-slate-400 font-bold text-xs">N/A</span> <span class="text-[10px] text-slate-500 font-mono font-normal">(Tidak Terpasang)</span>`;
+        if (caseFanPwm) caseFanPwm.innerText = `N/A`;
+        if (caseFanBar) caseFanBar.style.width = `0%`;
+      } else {
+        caseFanRpm.innerHTML = `<span class="text-indigo-300 font-bold">${fans.case ? fans.case.rpm : '—'}</span> <span class="text-xs text-slate-400 font-sans">RPM</span>`;
+        if (caseFanPwm) caseFanPwm.innerText = `${fans.case ? fans.case.pwm : 0}%`;
+        if (caseFanBar) caseFanBar.style.width = `${fans.case ? fans.case.pwm : 0}%`;
+      }
+    }
   }
 
-  // Voltages
+  // Voltages & Power Delivery
   if (voltages) {
     const v12Val = document.getElementById('v12-val');
     const v12Badge = document.getElementById('v12-badge');
@@ -971,13 +1240,13 @@ function updateUI() {
     const vcoreVal = document.getElementById('vcore-val');
     const totalPowerVal = document.getElementById('total-power-val');
 
-    if (v12Val) v12Val.innerText = (voltages.v12 || 17.58).toFixed(2);
-    if (v5Val) v5Val.innerText = (voltages.v5 || 5.01).toFixed(2);
-    if (v33Val) v33Val.innerText = (voltages.v33 || 3.31).toFixed(2);
-    if (vcoreVal) vcoreVal.innerText = (voltages.vcore || 1.15).toFixed(2);
-    if (totalPowerVal) totalPowerVal.innerText = `${(voltages.totalPower || 42.5).toFixed(1)} W`;
+    if (v12Val) v12Val.innerText = voltages.v12 != null ? voltages.v12.toFixed(2) : '—';
+    if (v5Val) v5Val.innerText = voltages.v5 != null ? voltages.v5.toFixed(2) : '—';
+    if (v33Val) v33Val.innerText = voltages.v33 != null ? voltages.v33.toFixed(2) : '—';
+    if (vcoreVal) vcoreVal.innerText = voltages.vcore != null ? voltages.vcore.toFixed(2) : '—';
+    if (totalPowerVal) totalPowerVal.innerText = voltages.totalPower != null ? `${voltages.totalPower.toFixed(1)} W` : '—';
 
-    if (v12Badge) {
+    if (v12Badge && voltages.v12 != null) {
       if (voltages.v12 < 11.40) {
         v12Badge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 animate-pulse';
         v12Badge.innerText = 'SAG DANGER';
