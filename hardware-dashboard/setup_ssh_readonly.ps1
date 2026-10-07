@@ -99,12 +99,18 @@ if (-not $userExists) {
     }
 
     if (-not $created) {
-        $netOut = & net.exe user "$monitorUser" "$monitorPass" /add /comment:"SIEM Agentless Read-Only Monitor" /passwordchg:no /expires:never 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "    -> User '$monitorUser' berhasil dibuat via net.exe." -ForegroundColor Green
+        try {
+            $comp = [ADSI]"WinNT://$env:COMPUTERNAME,computer"
+            $nu = $comp.Create("user", $monitorUser)
+            $nu.SetPassword($monitorPass)
+            $nu.Put("Description", "SIEM Agentless Read-Only Monitor")
+            # UserFlags: 0x10000 (DONT_EXPIRE_PASSWORD) + 0x40 (PASSWD_CANT_CHANGE) + 0x200 (NORMAL_ACCOUNT)
+            $nu.Put("UserFlags", 0x10000 -bor 0x40 -bor 0x200)
+            $nu.SetInfo()
             $created = $true
-        } else {
-            Write-Host "    -> Hasil net.exe: $netOut" -ForegroundColor Yellow
+            Write-Host "    -> User '$monitorUser' berhasil dibuat via Windows ADSI API." -ForegroundColor Green
+        } catch {
+            Write-Host "    -> Catatan ADSI: $($_.Exception.Message)" -ForegroundColor Gray
         }
     }
 } else {
@@ -208,7 +214,7 @@ if ($userSid) {
                 }
             }
         } catch {
-            Write-Host "    -> Catatan namespace $ns: izin telemetri bawaan tetap berlaku." -ForegroundColor Gray
+            Write-Host "    -> Catatan namespace ($ns): izin telemetri bawaan tetap berlaku." -ForegroundColor Gray
         }
     }
 } else {
