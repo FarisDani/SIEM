@@ -1,1 +1,0 @@
-{"integration":"system-metrics","host":"DATABASE-SERVER","os":"windows","cpu_pct":92.5,"ram_used_mb":13420,"ram_total_mb":16209,"ram_pct":82.8,"disk_used_gb":196.0,"disk_total_gb":215.0,"disk_pct":91.2,"uptime_hours":19.4,"top_process":"Docker Desktop (8888)"}

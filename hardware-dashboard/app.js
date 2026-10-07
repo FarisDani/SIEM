@@ -11,7 +11,7 @@ let activeEventFilter = 'ALL';
 let activeLogTab = 'EVENTS';
 let simulationMode = 'NORMAL';
 
-let activeNodeId = 'node_f93896f4';
+let activeNodeId = localStorage.getItem('hardware_dashboard_active_node') || 'node_cdecef22';
 let registeredNodes = [];
 let alertLogs = [];
 const maxLogCount = 100;
@@ -53,16 +53,27 @@ async function copyToClipboard(text, btnElement = null, successText = '✓ Tersa
 }
 
 // SSH Connection Error & Troubleshooting Modal Controller
-function openSshTroubleshootModal(nodeId = null) {
+function openSshTroubleshootModal(targetInput = null) {
   const modal = document.getElementById('ssh-troubleshoot-modal');
   if (!modal) return;
 
-  const targetNode = registeredNodes.find(n => n.id === (nodeId || activeNodeId)) || {
-    name: hardwareState.nodeName || 'Target Device',
-    host: hardwareState.sshConfig ? hardwareState.sshConfig.targetHost : '192.168.27.203',
-    port: hardwareState.sshConfig ? hardwareState.sshConfig.targetPort : 22,
-    user: hardwareState.sshConfig ? hardwareState.sshConfig.targetUser : 'admin'
-  };
+  let targetNode = null;
+  if (targetInput && typeof targetInput === 'object') {
+    targetNode = targetInput;
+  } else if (typeof targetInput === 'string') {
+    targetNode = registeredNodes.find(n => n.id === targetInput);
+  } else {
+    targetNode = registeredNodes.find(n => n.id === activeNodeId);
+  }
+
+  if (!targetNode) {
+    targetNode = {
+      name: hardwareState.nodeName || 'Target Device',
+      host: hardwareState.sshConfig ? hardwareState.sshConfig.targetHost : '192.168.27.203',
+      port: hardwareState.sshConfig ? hardwareState.sshConfig.targetPort : 22,
+      user: hardwareState.sshConfig ? hardwareState.sshConfig.targetUser : 'admin'
+    };
+  }
 
   const badge = document.getElementById('troubleshoot-node-badge');
   const info = document.getElementById('troubleshoot-node-info');
@@ -71,17 +82,21 @@ function openSshTroubleshootModal(nodeId = null) {
   const pshCodeElem = document.getElementById('powershell-fix-code');
 
   const sshCfg = hardwareState.sshConfig || {};
-  const errType = sshCfg.errorType && sshCfg.errorType !== 'NONE' ? sshCfg.errorType : (targetNode.errorType && targetNode.errorType !== 'NONE' ? targetNode.errorType : 'TIMEOUT');
-  const errMsg = sshCfg.lastError || targetNode.lastError || `Koneksi SSH Timeout: Komputer target ${targetNode.host}:${targetNode.port} tidak merespons (Port ${targetNode.port || 22} mungkin belum terbuka atau komputer target offline).`;
-  const errTime = sshCfg.errorTimestamp || new Date().toLocaleTimeString();
+  const errType = targetNode.errorType && targetNode.errorType !== 'NONE' ? targetNode.errorType : (sshCfg.errorType && sshCfg.errorType !== 'NONE' ? sshCfg.errorType : 'DIAGNOSTIK');
+  const targetPort = parseInt(targetNode.port) || 22;
+  const errMsg = targetNode.lastError || sshCfg.lastError || `Koneksi SSH Timeout: Komputer target ${targetNode.host}:${targetPort} tidak merespons (Port ${targetPort} mungkin belum dibuka atau komputer target offline).`;
+  const errTime = targetNode.errorTimestamp || sshCfg.errorTimestamp || new Date().toLocaleTimeString();
 
   if (badge) badge.innerText = errType;
-  if (info) info.innerText = `Target: ${targetNode.name} (${targetNode.host}:${targetNode.port || 22}) • User: ${targetNode.user || 'system'}`;
+  if (info) info.innerText = `Target: ${targetNode.name} (${targetNode.host}:${targetPort}) • User: ${targetNode.user || 'system'}`;
   if (timeElem) timeElem.innerText = errTime;
   if (msgElem) msgElem.innerText = errMsg;
 
+  const portLabel = document.getElementById('troubleshoot-port-label');
+  if (portLabel) portLabel.innerText = targetPort;
+
   if (pshCodeElem) {
-    pshCodeElem.innerText = `$p="$env:windir\\System32\\OpenSSH\\sshd.exe"; if (-not (Test-Path $p)) { $p="$env:ProgramFiles\\OpenSSH\\sshd.exe" }; if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { & sc.exe create sshd binPath= "\`"$p\`"" start= auto DisplayName= "OpenSSH SSH Server" }; & "$env:windir\\System32\\OpenSSH\\ssh-keygen.exe" -A; Set-Service sshd -StartupType Automatic; Start-Service sshd; netsh advfirewall firewall add rule name="OpenSSH-Server-In-TCP-${targetNode.port || 22}" dir=in action=allow protocol=TCP localport=${targetNode.port || 22} profile=any; Write-Host "SSH PORT ${targetNode.port || 22} AKTIF!" -ForegroundColor Green`;
+    pshCodeElem.innerText = `if (-not (Get-Service sshd -ErrorAction SilentlyContinue) -and -not (Test-Path "$env:windir\\System32\\OpenSSH\\sshd.exe") -and -not (Test-Path "$env:ProgramFiles\\OpenSSH\\sshd.exe")) { try { Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction SilentlyContinue | Out-Null } catch {} }; $p="$env:windir\\System32\\OpenSSH\\sshd.exe"; if (-not (Test-Path $p)) { $p="$env:ProgramFiles\\OpenSSH\\sshd.exe" }; if (-not (Get-Service sshd -ErrorAction SilentlyContinue) -and (Test-Path $p)) { & sc.exe create sshd binPath= "\`"$p\`"" start= auto DisplayName= "OpenSSH SSH Server" | Out-Null }; $cfg="C:\\ProgramData\\ssh\\sshd_config"; if (-not (Test-Path 'C:\\ProgramData\\ssh')) { New-Item -ItemType Directory -Path 'C:\\ProgramData\\ssh' -Force | Out-Null }; if (Test-Path $cfg) { $lines = (Get-Content $cfg) | Where-Object { $_ -notmatch '^\\s*#?\\s*Port\\s+' -and $_ -notmatch '^\\s*#?\\s*PasswordAuthentication\\s+' -and $_ -notmatch 'HostKey __PROGRAMDATA__' }; $lines = @("Port ${targetPort}", "PasswordAuthentication yes") + $lines; $lines | Set-Content -Encoding ASCII $cfg } else { @("Port ${targetPort}", "ListenAddress 0.0.0.0", "PubkeyAuthentication yes", "PasswordAuthentication yes", "AuthorizedKeysFile .ssh/authorized_keys", "Subsystem sftp sftp-server.exe") | Set-Content -Encoding ASCII $cfg }; $kg = if (Test-Path "$env:windir\\System32\\OpenSSH\\ssh-keygen.exe") { "$env:windir\\System32\\OpenSSH\\ssh-keygen.exe" } else { "$env:ProgramFiles\\OpenSSH\\ssh-keygen.exe" }; if (Test-Path $kg) { & $kg -A 2>$null }; try { $s1=New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18'); $s2=New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544'); Get-ChildItem 'C:\\ProgramData\\ssh\\*key*' | ForEach-Object { $a=New-Object System.Security.AccessControl.FileSecurity; $a.SetAccessRuleProtection($true,$false); $a.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($s1,'FullControl','Allow'))); $a.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($s2,'FullControl','Allow'))); Set-Acl $_.FullName $a } } catch {}; Set-Service sshd -StartupType Automatic -ErrorAction SilentlyContinue; Restart-Service sshd -Force -ErrorAction SilentlyContinue; netsh advfirewall firewall delete rule name="OpenSSH-Server-In-TCP-${targetPort}" >$null 2>&1; netsh advfirewall firewall add rule name="OpenSSH-Server-In-TCP-${targetPort}" dir=in action=allow protocol=TCP localport=${targetPort} profile=any | Out-Null; Write-Host "BERHASIL: OPENSSH SERVER DAN FIREWALL PORT ${targetPort} AKTIF!" -ForegroundColor Green`;
   }
 
   modal.classList.remove('hidden');
@@ -213,7 +228,7 @@ function initTooltipEngine() {
       headerHtml = `
         <div class="tooltip-header">
           <div class="tooltip-title">
-            <span>🔹</span>
+            <svg class="w-3 h-3 text-[#0A0A0A] dark:text-white inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" stroke-width="2"></circle></svg>
             <span>${escapeHtml(data.title)}</span>
           </div>
           <span class="tooltip-badge">${escapeHtml(data.category)}</span>
@@ -262,11 +277,11 @@ function calculateGaugeOffset(value, min = 20, max = 100) {
 // Helper: Determine Temperature Color & Status
 function getTempStatus(temp) {
   if (temp >= 85) {
-    return { color: 'text-rose-500', stroke: '#f43f5e', badgeBg: 'bg-rose-500/20', badgeText: 'text-rose-400', badgeBorder: 'border-rose-500/30', label: 'CRITICAL' };
+    return { color: 'text-[#DC2626]', stroke: '#DC2626', badgeClass: 'badge badge-danger', label: 'CRITICAL' };
   } else if (temp >= 75) {
-    return { color: 'text-amber-500', stroke: '#f59e0b', badgeBg: 'bg-amber-500/20', badgeText: 'text-amber-400', badgeBorder: 'border-amber-500/30', label: 'WARM' };
+    return { color: 'text-[#D97706]', stroke: '#D97706', badgeClass: 'badge badge-warning', label: 'WARM' };
   } else {
-    return { color: 'text-cyan-400', stroke: '#22d3ee', badgeBg: 'bg-emerald-500/20', badgeText: 'text-emerald-400', badgeBorder: 'border-emerald-500/30', label: 'OPTIMAL' };
+    return { color: 'text-[#16A34A]', stroke: '#16A34A', badgeClass: 'badge badge-success', label: 'OPTIMAL' };
   }
 }
 
@@ -320,7 +335,7 @@ function renderAlertsTable() {
   if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="py-8 text-center text-slate-500 font-sans">
+        <td colspan="6" class="py-8 text-center text-[#888886] font-sans">
           Tidak ada insiden hardware dengan filter ${activeAlertFilter}.
         </td>
       </tr>
@@ -329,34 +344,35 @@ function renderAlertsTable() {
   }
 
   tbody.innerHTML = filtered.map(item => {
-    let badgeClass = 'bg-slate-700/40 text-slate-300 border-slate-600/50';
-    if (item.severity === 'CRITICAL') badgeClass = 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse';
-    if (item.severity === 'WARNING') badgeClass = 'bg-amber-500/20 text-amber-400 border-amber-500/40';
-    if (item.severity === 'INFO') badgeClass = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
+    let badgeClass = 'badge badge-neutral';
+    if (item.severity === 'CRITICAL') badgeClass = 'badge badge-danger';
+    if (item.severity === 'WARNING') badgeClass = 'badge badge-warning';
+    if (item.severity === 'INFO') badgeClass = 'badge badge-info';
 
     const copyPayload = `[${item.timestamp}] [${item.severity}] [${item.component}] ${item.message} | Rekomendasi: ${item.action}`;
 
     return `
-      <tr class="hover:bg-slate-800/40 transition">
-        <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap">${item.timestamp}</td>
+      <tr class="hover:bg-[#F9F9F7] transition">
+        <td class="py-2.5 px-4 text-[#888886] whitespace-nowrap">${item.timestamp}</td>
         <td class="py-2.5 px-3">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${badgeClass}">
+          <span class="${badgeClass}">
             ${item.severity}
           </span>
         </td>
-        <td class="py-2.5 px-3 font-semibold text-slate-200">${item.component}</td>
-        <td class="py-2.5 px-4 text-slate-300 font-sans max-w-md truncate truncate-hoverable"
+        <td class="py-2.5 px-3 font-semibold text-[#0A0A0A]">${item.component}</td>
+        <td class="py-2.5 px-4 text-[#4A4A48] font-sans max-w-md truncate truncate-hoverable"
             data-tooltip-title="Hardware Anomaly Alert"
             data-tooltip-category="${item.severity}"
             data-tooltip="${escapeHtml(item.message)}">${item.message}</td>
-        <td class="py-2.5 px-3 text-slate-400 font-sans max-w-xs truncate truncate-hoverable"
+        <td class="py-2.5 px-3 text-[#888886] font-sans max-w-xs truncate truncate-hoverable"
             data-tooltip-title="Rekomendasi Tindakan NOC"
             data-tooltip-category="MITIGATION"
             data-tooltip="${escapeHtml(item.action)}">${item.action}</td>
         <td class="py-2.5 px-3 text-right">
-          <button class="copy-alert-row-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-800/80 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 border border-slate-700/50 hover:border-cyan-500/30 transition flex items-center gap-1 ml-auto"
+          <button class="copy-alert-row-btn btn btn-ghost btn-sm flex items-center gap-1 ml-auto"
                   data-log="${escapeHtml(copyPayload)}" title="Salin rincian alarm ini">
-            <span>📋 Salin</span>
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            <span>Salin</span>
           </button>
         </td>
       </tr>
@@ -408,7 +424,7 @@ function renderOsEventsTable() {
   if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="7" class="py-8 text-center text-slate-500 font-sans">
+        <td colspan="7" class="py-8 text-center text-[#888886] font-sans">
           Tidak ada event Windows dengan filter ${activeEventFilter}.
         </td>
       </tr>
@@ -417,42 +433,43 @@ function renderOsEventsTable() {
   }
 
   tbody.innerHTML = filtered.map(item => {
-    let lvlBadge = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30';
-    if (item.level === 'Warning') lvlBadge = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
-    if (item.level === 'Error' || item.level === 'Critical') lvlBadge = 'bg-rose-500/20 text-rose-400 border-rose-500/30';
+    let lvlBadge = 'badge badge-neutral';
+    if (item.level === 'Warning') lvlBadge = 'badge badge-warning';
+    if (item.level === 'Error' || item.level === 'Critical') lvlBadge = 'badge badge-danger';
 
-    let logBadge = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
-    if (item.logName === 'Security') logBadge = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
-    if (item.logName === 'Application') logBadge = 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+    let logBadge = 'badge badge-neutral';
+    if (item.logName === 'Security') logBadge = 'badge badge-success';
+    if (item.logName === 'Application') logBadge = 'badge badge-info';
 
     const copyPayload = `[${item.time}] [${item.level || 'Info'}] [${item.logName}] [Event ID: ${item.eventId || '—'}] ${item.source}: ${item.message}`;
 
     return `
-      <tr class="hover:bg-slate-800/40 transition">
-        <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap font-mono text-[11px]">${item.time}</td>
+      <tr class="hover:bg-[#F9F9F7] transition">
+        <td class="py-2.5 px-4 text-[#888886] whitespace-nowrap font-mono text-[11px]">${item.time}</td>
         <td class="py-2.5 px-3">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${lvlBadge}">
+          <span class="${lvlBadge}">
             ${item.level || 'Info'}
           </span>
         </td>
         <td class="py-2.5 px-3">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${logBadge}">
+          <span class="${logBadge}">
             ${item.logName}
           </span>
         </td>
-        <td class="py-2.5 px-3 font-mono text-cyan-400 font-bold">${item.eventId || '—'}</td>
-        <td class="py-2.5 px-4 font-semibold text-slate-200 text-xs max-w-[160px] truncate truncate-hoverable"
+        <td class="py-2.5 px-3 font-mono text-[#0A0A0A] font-bold">${item.eventId || '—'}</td>
+        <td class="py-2.5 px-4 font-semibold text-[#0A0A0A] text-xs max-w-[160px] truncate truncate-hoverable"
             data-tooltip-title="Provider Event Source"
             data-tooltip-category="${item.logName || 'WINDOWS'}"
             data-tooltip="${escapeHtml(item.source)}">${item.source}</td>
-        <td class="py-2.5 px-4 text-slate-300 font-sans text-xs max-w-md truncate truncate-hoverable"
+        <td class="py-2.5 px-4 text-[#4A4A48] font-sans text-xs max-w-md truncate truncate-hoverable"
             data-tooltip-title="Windows Event ID #${item.eventId || '—'}"
             data-tooltip-category="${item.logName || 'WINDOWS'} (${item.level || 'Info'})"
             data-tooltip="${escapeHtml(item.message)}">${item.message}</td>
         <td class="py-2.5 px-3 text-right">
-          <button class="copy-event-row-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-800/80 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 border border-slate-700/50 hover:border-cyan-500/30 transition flex items-center gap-1 ml-auto"
+          <button class="copy-event-row-btn btn btn-ghost btn-sm flex items-center gap-1 ml-auto"
                   data-log="${escapeHtml(copyPayload)}" title="Salin rincian event Windows ini">
-            <span>📋 Salin</span>
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            <span>Salin</span>
           </button>
         </td>
       </tr>
@@ -480,28 +497,21 @@ function renderTopNodeTabs() {
     const tempVal = node.temp ? `${node.temp.toFixed(1)}°C` : '—';
     const pingVal = node.latencyMs ? `${node.latencyMs}ms` : '';
 
-    let baseClass = isCurrent
-      ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/60 shadow-lg shadow-cyan-500/10'
-      : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-700/80 border-slate-700/80';
-
-    let pingDot = isConn
-      ? '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>'
-      : '<span class="w-2 h-2 rounded-full bg-amber-400"></span>';
+    const dotClass = isConn ? 'bg-[#16A34A]' : 'bg-[#D97706]';
+    const activeClass = isCurrent ? 'filter-pill active' : 'filter-pill';
 
     return `
-      <div class="flex items-center rounded-xl border transition cursor-pointer ${baseClass}">
-        <button class="node-tab-btn flex items-center space-x-2 px-3 py-1.5 text-xs font-mono font-bold truncate-hoverable"
+      <div class="inline-flex items-center gap-1 ${activeClass}">
+        <button class="node-tab-btn flex items-center gap-1.5 cursor-pointer"
                 data-node-id="${node.id}"
-                data-tooltip-title="Profil Target Monitoring"
-                data-tooltip-category="${node.type}"
-                data-tooltip="${escapeHtml(node.name)} (${node.host}:${node.port}) • User: ${node.user || 'system'} • Suhu: ${tempVal} • Latensi: ${pingVal || '0ms'}">
-          ${pingDot}
-          <span class="truncate max-w-[140px]">${node.name}</span>
-          <span class="text-[10px] px-1.5 py-0.2 rounded bg-slate-900/80 text-cyan-300">${tempVal}</span>
-          ${pingVal ? `<span class="text-[10px] text-slate-400">${pingVal}</span>` : ''}
+                title="${escapeHtml(node.name)} (${node.host}:${node.port})">
+          <span class="w-1.5 h-1.5 rounded-full ${dotClass}"></span>
+          <span class="truncate max-w-[130px] font-bold">${escapeHtml(node.name)}</span>
+          <span class="pill-count">${tempVal}</span>
+          ${pingVal ? `<span class="pill-count">${pingVal}</span>` : ''}
         </button>
-        <button class="node-edit-btn px-2 py-1.5 text-slate-400 hover:text-cyan-300 border-l border-slate-700/50" data-node-id="${node.id}" title="Edit Profil Perangkat">
-          ⚙️
+        <button class="node-edit-btn opacity-60 hover:opacity-100 cursor-pointer ml-1 text-xs p-1" data-node-id="${node.id}" title="Edit Profil Perangkat">
+          <svg class="w-3.5 h-3.5 text-[#0A0A0A] dark:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><circle cx="12" cy="12" r="3" stroke-width="2"></circle></svg>
         </button>
       </div>
     `;
@@ -529,6 +539,9 @@ function renderTopNodeTabs() {
 // Switch Active Node Tab
 async function selectNode(nodeId) {
   activeNodeId = nodeId;
+  try {
+    localStorage.setItem('hardware_dashboard_active_node', nodeId);
+  } catch (e) {}
   renderTopNodeTabs();
   
   const activeNameElem = document.getElementById('active-node-name');
@@ -555,7 +568,20 @@ async function fetchNodes() {
     if (res.ok) {
       const data = await res.json();
       registeredNodes = data.nodes || [];
-      if (data.activeNodeId) activeNodeId = data.activeNodeId;
+      
+      // Ensure activeNodeId points to a valid registered node
+      const currentValid = registeredNodes.some(n => n.id === activeNodeId);
+      if (!currentValid) {
+        const stored = localStorage.getItem('hardware_dashboard_active_node');
+        if (stored && registeredNodes.some(n => n.id === stored)) {
+          activeNodeId = stored;
+        } else if (data.activeNodeId && registeredNodes.some(n => n.id === data.activeNodeId)) {
+          activeNodeId = data.activeNodeId;
+        } else if (registeredNodes.length > 0) {
+          activeNodeId = registeredNodes[0].id;
+        }
+      }
+
       renderTopNodeTabs();
 
       const activeNameElem = document.getElementById('active-node-name');
@@ -595,7 +621,7 @@ function drawCyberSparkline(canvasId, dataPoints, strokeColor, fillColor, minVal
   }
 
   // Grid lines
-  ctx.strokeStyle = 'rgba(51, 65, 85, 0.3)';
+  ctx.strokeStyle = '#E5E5E3';
   ctx.lineWidth = 1;
   ctx.setLineDash([2, 4]);
 
@@ -635,7 +661,7 @@ function drawCyberSparkline(canvasId, dataPoints, strokeColor, fillColor, minVal
 
     const gradient = ctx.createLinearGradient(0, 0, 0, h);
     gradient.addColorStop(0, fillColor);
-    gradient.addColorStop(1, 'rgba(15, 23, 42, 0)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = gradient;
     ctx.fill();
   }
@@ -653,22 +679,16 @@ function drawCyberSparkline(canvasId, dataPoints, strokeColor, fillColor, minVal
     });
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 2;
-    ctx.shadowColor = strokeColor;
-    ctx.shadowBlur = 6;
     ctx.stroke();
-    ctx.shadowBlur = 0;
   }
 
-  // Glowing dot on latest point
+  // Dot on latest point
   if (points.length > 0) {
     const last = points[points.length - 1];
     ctx.beginPath();
-    ctx.arc(last.x, last.y, 3.5, 0, Math.PI * 2);
+    ctx.arc(last.x, last.y, 3, 0, Math.PI * 2);
     ctx.fillStyle = strokeColor;
-    ctx.shadowColor = strokeColor;
-    ctx.shadowBlur = 8;
     ctx.fill();
-    ctx.shadowBlur = 0;
   }
 
   ctx.restore();
@@ -678,11 +698,11 @@ function drawCyberSparkline(canvasId, dataPoints, strokeColor, fillColor, minVal
 function renderTimeseriesCharts(timeseries, hardwareState) {
   if (!timeseries) return;
 
-  const cpuData = timeseries.cpu && timeseries.cpu.length > 0 ? timeseries.cpu : [14];
-  const ramData = timeseries.ram && timeseries.ram.length > 0 ? timeseries.ram : [38.7];
-  const diskData = timeseries.disk && timeseries.disk.length > 0 ? timeseries.disk : [12.4];
-  const netRxData = timeseries.net_rx && timeseries.net_rx.length > 0 ? timeseries.net_rx : [145];
-  const netTxData = timeseries.net_tx && timeseries.net_tx.length > 0 ? timeseries.net_tx : [42];
+  const cpuData = timeseries.cpu && timeseries.cpu.length > 0 ? timeseries.cpu : [0];
+  const ramData = timeseries.ram && timeseries.ram.length > 0 ? timeseries.ram : [0];
+  const diskData = timeseries.disk && timeseries.disk.length > 0 ? timeseries.disk : [0];
+  const netRxData = timeseries.net_rx && timeseries.net_rx.length > 0 ? timeseries.net_rx : [0];
+  const netTxData = timeseries.net_tx && timeseries.net_tx.length > 0 ? timeseries.net_tx : [0];
 
   // 1. CPU Load
   const latestCpu = cpuData[cpuData.length - 1] || 0;
@@ -700,7 +720,7 @@ function renderTimeseriesCharts(timeseries, hardwareState) {
   if (statCpuAvg) statCpuAvg.innerText = `${cpuAvg.toFixed(0)}%`;
   if (statCpuMax) statCpuMax.innerText = `${cpuMax.toFixed(0)}%`;
 
-  drawCyberSparkline('chart-cpu', cpuData, '#22d3ee', 'rgba(34, 211, 238, 0.3)', 0, 100, '%');
+  drawCyberSparkline('chart-cpu', cpuData, '#F97316', 'rgba(249, 115, 22, 0.15)', 0, 100, '%');
 
   // 2. RAM Usage
   const latestRam = ramData[ramData.length - 1] || 0;
@@ -713,7 +733,7 @@ function renderTimeseriesCharts(timeseries, hardwareState) {
   if (statRamUsed) statRamUsed.innerText = (ramSummary && ramSummary.usedGb != null) ? `${ramSummary.usedGb.toFixed(1)} GB` : '—';
   if (statRamTotal) statRamTotal.innerText = (ramSummary && ramSummary.totalGb != null) ? `${ramSummary.totalGb.toFixed(1)} GB` : '—';
 
-  drawCyberSparkline('chart-ram', ramData, '#10b981', 'rgba(16, 185, 129, 0.3)', 0, 100, '%');
+  drawCyberSparkline('chart-ram', ramData, '#16A34A', 'rgba(22, 163, 74, 0.12)', 0, 100, '%');
 
   // 3. Disk Activity
   const latestDisk = diskData[diskData.length - 1] || 0;
@@ -724,7 +744,7 @@ function renderTimeseriesCharts(timeseries, hardwareState) {
   if (diskBadge) diskBadge.innerText = `${latestDisk.toFixed(1)} MB/s`;
   if (statDiskRate) statDiskRate.innerText = `${latestDisk.toFixed(1)} MB/s`;
 
-  drawCyberSparkline('chart-disk', diskData, '#c084fc', 'rgba(192, 132, 252, 0.3)', 0, diskMax, 'MB/s');
+  drawCyberSparkline('chart-disk', diskData, '#7C3AED', 'rgba(124, 58, 237, 0.12)', 0, diskMax, 'MB/s');
 
   // 4. Network Bandwidth
   const latestRx = netRxData[netRxData.length - 1] || 0;
@@ -738,7 +758,7 @@ function renderTimeseriesCharts(timeseries, hardwareState) {
   if (statNetRx) statNetRx.innerText = `${latestRx.toFixed(0)} KB/s`;
   if (statNetTx) statNetTx.innerText = `${latestTx.toFixed(0)} KB/s`;
 
-  drawCyberSparkline('chart-network', netRxData, '#06b6d4', 'rgba(6, 182, 212, 0.25)', 0, netMax, 'KB/s');
+  drawCyberSparkline('chart-network', netRxData, '#0D9488', 'rgba(13, 148, 136, 0.12)', 0, netMax, 'KB/s');
 
   // Synchronize Top Executive Quick Pulse Bar
   const pulseCpu = document.getElementById('pulse-cpu-val');
@@ -750,6 +770,56 @@ function renderTimeseriesCharts(timeseries, hardwareState) {
   if (pulseRam) pulseRam.innerText = `${latestRam.toFixed(1)}%`;
   if (pulseDisk) pulseDisk.innerText = `${latestDisk.toFixed(1)} MB/s`;
   if (pulseNet) pulseNet.innerText = `↓ ${latestRx.toFixed(0)} KB/s`;
+}
+
+// Render Top 5 Active Processes Consumer (Pure Real-Time Telemetry from SSH)
+function renderTopProcessesTable(topProcesses) {
+  const tbody = document.getElementById('top-processes-tbody');
+  if (!tbody) return;
+
+  if (!topProcesses || topProcesses.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" class="py-4 text-center text-[#888886] font-sans text-xs">
+          Tidak ada data proses atau sedang menunggu pembacaan dari target SSH...
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = topProcesses.map((p, idx) => {
+    const pid = p.Id || p.PID || '—';
+    const name = escapeHtml(p.Name || p.ProcessName || 'Process');
+    const cpuTime = p.CPU != null ? p.CPU.toFixed(1) : '—';
+    const memMb = p.MemMB != null ? p.MemMB.toFixed(1) : '—';
+
+    let impactBadge = 'badge badge-neutral';
+    let impactText = 'NORMAL';
+    if (idx === 0) {
+      impactBadge = 'badge badge-danger';
+      impactText = 'TOP 1';
+    } else if (idx === 1) {
+      impactBadge = 'badge badge-warning';
+      impactText = 'HIGH';
+    }
+
+    return `
+      <tr class="hover:bg-[#F9F9F7] transition">
+        <td class="py-2 px-3 font-mono font-bold text-[#0A0A0A]">${pid}</td>
+        <td class="py-2 px-3 font-medium text-[#0A0A0A] truncate max-w-[200px]" title="${name}">
+          ${name}
+        </td>
+        <td class="py-2 px-3 text-right font-mono font-semibold text-[#16A34A]">${cpuTime}s</td>
+        <td class="py-2 px-3 text-right font-mono font-semibold text-[#7C3AED]">${memMb} MB</td>
+        <td class="py-2 px-3 text-center">
+          <span class="${impactBadge}">
+            ${impactText}
+          </span>
+        </td>
+      </tr>
+    `;
+  }).join('');
 }
 
 // Render Dynamic RAM Modules Cards
@@ -771,16 +841,16 @@ function renderDynamicRam(ramModules, ramSummary) {
     if (ramBarText) ramBarText.innerText = `${usedGb.toFixed(1)} GB / ${totalGb.toFixed(1)} GB Used (${freeGb.toFixed(1)} GB Free)`;
     if (ramUsageBar) ramUsageBar.style.width = `${Math.min(100, Math.max(5, usedPct))}%`;
   } else {
-    if (ramTotalBadge) ramTotalBadge.innerHTML = `<span class="text-rose-400">⚠️ —</span>`;
-    if (ramUsedBadge) ramUsedBadge.innerHTML = `<span class="text-rose-400">⚠️ Tidak Terdeteksi</span>`;
-    if (ramBarText) ramBarText.innerHTML = `<span class="text-rose-400">⚠️ Data RAM Tidak Terbaca</span>`;
+    if (ramTotalBadge) ramTotalBadge.innerHTML = `<span class="text-[#DC2626]">⚠️ —</span>`;
+    if (ramUsedBadge) ramUsedBadge.innerHTML = `<span class="text-[#DC2626]">⚠️ Tidak Terdeteksi</span>`;
+    if (ramBarText) ramBarText.innerHTML = `<span class="text-[#DC2626]">⚠️ Data RAM Tidak Terbaca</span>`;
   }
 
   if (!container) return;
 
   if (!ramModules || ramModules.length === 0) {
     container.innerHTML = `
-      <div class="col-span-full p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-center text-xs font-mono font-bold">
+      <div class="col-span-full p-4 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-[#DC2626] text-center text-xs font-mono font-bold">
         ⚠️ Data Modul RAM Fisik Tidak Terdeteksi via SSH
       </div>
     `;
@@ -789,40 +859,41 @@ function renderDynamicRam(ramModules, ramSummary) {
 
   container.innerHTML = ramModules.map((mod, idx) => {
     return `
-      <div class="p-4 rounded-xl bg-slate-900/70 border border-slate-800/90 hover:border-cyan-500/40 transition flex flex-col justify-between space-y-3">
+      <div class="p-4 rounded-xl bg-white border border-[#E5E5E3] hover:border-[#D0D0CE] transition flex flex-col justify-between space-y-3">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2">
-            <span class="text-base">💾</span>
+            <svg class="w-4 h-4 text-[#0A0A0A] dark:text-white inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
             <div>
-              <span class="text-xs font-bold text-slate-200">${mod.slot || `DIMM Slot ${idx+1}`}</span>
-              <div class="text-[10px] text-slate-400 font-mono">${mod.bank || 'Channel A'}</div>
+              <span class="text-xs font-bold text-[#0A0A0A]">${mod.slot || `DIMM Slot ${idx+1}`}</span>
+              <div class="text-[10px] text-[#888886] font-mono">${mod.bank || 'Channel A'}</div>
             </div>
           </div>
-          <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+          <span class="badge badge-neutral">
             ${mod.type || 'RAM'}
           </span>
         </div>
 
         <div class="py-1">
-          <div class="text-2xl font-mono font-black text-cyan-300">
-            ${(mod.capacityGb != null ? mod.capacityGb : 0).toFixed(1)} <span class="text-xs text-slate-400 font-sans">GB</span>
+          <div class="text-2xl font-mono font-black text-[#0A0A0A]">
+            ${(mod.capacityGb != null ? mod.capacityGb : 0).toFixed(1)} <span class="text-xs text-[#888886] font-sans">GB</span>
           </div>
-          <div class="text-[11px] font-mono text-emerald-400 font-semibold">
-            ⚡ ${mod.speedMhz || '—'} MT/s (MHz)
+          <div class="text-[11px] font-mono text-[#16A34A] font-semibold flex items-center gap-1">
+            <svg class="w-3 h-3 text-[#16A34A] inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            <span>${mod.speedMhz || '—'} MT/s (MHz)</span>
           </div>
         </div>
 
-        <div class="pt-2 border-t border-slate-800/80 text-[11px] space-y-1 font-mono text-slate-400">
+        <div class="pt-2 border-t border-[#E5E5E3] text-[11px] space-y-1 font-mono text-[#4A4A48]">
           <div class="flex justify-between items-center">
-            <span>Manufaktur:</span>
-            <span class="text-slate-200 font-semibold truncate max-w-[120px] truncate-hoverable"
+            <span class="text-[#888886]">Manufaktur:</span>
+            <span class="text-[#0A0A0A] font-semibold truncate max-w-[120px] truncate-hoverable"
                   data-tooltip-title="RAM Manufacturer"
                   data-tooltip-category="MEMORY DIMM"
                   data-tooltip="${escapeHtml(mod.manufacturer || 'OEM Standard')}">${mod.manufacturer || 'OEM'}</span>
           </div>
           <div class="flex justify-between items-center">
-            <span>Part Number:</span>
-            <span class="text-slate-300 truncate max-w-[130px] truncate-hoverable"
+            <span class="text-[#888886]">Part Number:</span>
+            <span class="text-[#4A4A48] truncate max-w-[130px] truncate-hoverable"
                   data-tooltip-title="RAM Part Number / Serial"
                   data-tooltip-category="MEMORY DIMM"
                   data-tooltip="${escapeHtml(mod.partNumber || 'Module Part')}">${mod.partNumber || 'Module Part'}</span>
@@ -840,7 +911,7 @@ function renderDynamicStorage(storageDisks) {
 
   if (!storageDisks || storageDisks.length === 0) {
     container.innerHTML = `
-      <div class="col-span-full p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-center text-xs font-mono font-bold">
+      <div class="col-span-full p-4 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-[#DC2626] text-center text-xs font-mono font-bold">
         ⚠️ Unit Penyimpanan Fisik & Partisi Tidak Terdeteksi via SSH
       </div>
     `;
@@ -851,52 +922,52 @@ function renderDynamicStorage(storageDisks) {
     const parts = disk.partitions || [];
     const partitionsHtml = parts.length > 0 ? parts.map(p => {
       const usedPct = p.usedPct || 0;
-      const barColor = usedPct > 85 ? 'from-rose-500 to-amber-500' : 'from-cyan-500 to-teal-400';
+      const barColor = usedPct >= 80 ? 'bg-[#DC2626]' : 'bg-[#16A34A]';
       return `
-        <div class="space-y-1 pt-1.5 border-t border-slate-800/60 font-mono text-xs">
+        <div class="space-y-1 pt-1.5 border-t border-[#E5E5E3] font-mono text-xs">
           <div class="flex justify-between items-center text-[11px]">
-            <span class="font-bold text-slate-200">${p.drive} [${p.label || 'Drive'}]</span>
-            <span class="text-cyan-300 font-semibold">${(p.usedGb || 0).toFixed(1)} / ${(p.totalGb || 0).toFixed(1)} GB (${usedPct.toFixed(0)}%)</span>
+            <span class="font-bold text-[#0A0A0A]">${p.drive} [${p.label || 'Drive'}]</span>
+            <span class="text-[#0A0A0A] font-semibold">${(p.usedGb || 0).toFixed(1)} / ${(p.totalGb || 0).toFixed(1)} GB (${usedPct.toFixed(0)}%)</span>
           </div>
-          <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-            <div class="bg-gradient-to-r ${barColor} h-1.5 rounded-full transition-all duration-500" style="width: ${Math.min(100, Math.max(3, usedPct))}%"></div>
+          <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden">
+            <div class="${barColor} h-1.5 rounded-full transition-all duration-500" style="width: ${Math.min(100, Math.max(3, usedPct))}%"></div>
           </div>
-          <div class="flex justify-between text-[10px] text-slate-400">
+          <div class="flex justify-between text-[10px] text-[#888886]">
             <span>Sisa Free: ${(p.freeGb || 0).toFixed(1)} GB</span>
             <span>Format: ${p.fileSystem || 'NTFS'}</span>
           </div>
         </div>
       `;
     }).join('') : `
-      <div class="text-[10px] text-slate-500 font-mono italic">Volume sistem / Drive partisi aktif</div>
+      <div class="text-[10px] text-[#888886] font-mono italic">Volume sistem / Drive partisi aktif</div>
     `;
 
     return `
-      <div class="p-4 rounded-xl bg-slate-900/70 border border-slate-800/90 hover:border-cyan-500/40 transition flex flex-col justify-between space-y-3">
+      <div class="p-4 rounded-xl bg-white border border-[#E5E5E3] hover:border-[#D0D0CE] transition flex flex-col justify-between space-y-3">
         <div class="flex items-start justify-between gap-2">
           <div class="flex items-center space-x-2">
-            <span class="text-xl">💽</span>
+            <svg class="w-4 h-4 text-[#0A0A0A] dark:text-white inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
             <div>
-              <div class="text-xs font-bold text-slate-200 truncate max-w-[220px] truncate-hoverable"
+              <div class="text-xs font-bold text-[#0A0A0A] truncate max-w-[220px] truncate-hoverable"
                    data-tooltip-title="Physical Storage Drive"
                    data-tooltip-category="${disk.interface || 'NVMe'}"
                    data-tooltip="Disk ${disk.index}: ${escapeHtml(disk.model)} | Kapasitas: ${(disk.sizeGb || 0).toFixed(1)} GB | Status: ${disk.status || 'OK'}">Disk ${disk.index}: ${disk.model}</div>
-              <div class="text-[10px] text-slate-400 font-mono">${disk.interface || 'NVMe'} &bull; Kapasitas: ${(disk.sizeGb || 0).toFixed(0)} GB</div>
+              <div class="text-[10px] text-[#888886] font-mono">${disk.interface || 'NVMe'} &bull; Kapasitas: ${(disk.sizeGb || 0).toFixed(0)} GB</div>
             </div>
           </div>
-          <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+          <span class="badge badge-success whitespace-nowrap">
             ${disk.status || 'HEALTHY'}
           </span>
         </div>
 
         <div class="space-y-2">
-          <div class="text-[11px] font-semibold text-slate-300">Partisi & Volume Logikal:</div>
+          <div class="text-[11px] font-semibold text-[#4A4A48]">Partisi & Volume Logikal:</div>
           ${partitionsHtml}
         </div>
 
-        <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono text-slate-400">
+        <div class="pt-2 border-t border-[#E5E5E3] flex items-center justify-between text-[11px] font-mono text-[#888886]">
           <span>Suhu Controller:</span>
-          <span class="text-teal-300 font-bold">${disk.temp || 38.0}°C</span>
+          <span class="text-[#0A0A0A] font-bold">${disk.temp != null ? disk.temp + '°C' : '<span class="text-[#888886] font-normal">N/A</span>'}</span>
         </div>
       </div>
     `;
@@ -908,27 +979,48 @@ function evaluateHardwareRules() {
   const { cpu, gpu, fans, voltages, sourceMode, sshConfig } = hardwareState;
 
   if (sourceMode === 'SSH_REMOTE' && sshConfig && !sshConfig.connected) {
-    triggerAlert('WARNING', 'SSH Link', `Koneksi SSH ke ${sshConfig.targetHost} terputus atau mencoba menghubungkan kembali.`, 'Periksa IP, user, atau password');
+    const targetHost = sshConfig.targetHost || 'Target Node';
+    const targetPort = sshConfig.targetPort || 22;
+    const errMsg = sshConfig.lastError || `Koneksi SSH ke ${targetHost}:${targetPort} Timeout / Tidak Merespons.`;
+    triggerAlert('CRITICAL', 'SSH Link Disconnected', errMsg, 'Buka modal Troubleshooting untuk diagnosa & script OpenSSH');
+
+    const banner = document.getElementById('global-alert-banner');
+    const title = document.getElementById('global-alert-title');
+    const msg = document.getElementById('global-alert-msg');
+    const bannerBtn = document.getElementById('banner-troubleshoot-btn');
+    if (banner && title && msg) {
+      banner.classList.remove('hidden');
+      title.innerText = `SSH LINK DISCONNECTED: ${targetHost}`;
+      msg.innerText = errMsg;
+      if (bannerBtn) bannerBtn.classList.remove('hidden');
+    }
+  } else if (sourceMode === 'SSH_REMOTE' && sshConfig && sshConfig.connected) {
+    const banner = document.getElementById('global-alert-banner');
+    const bannerBtn = document.getElementById('banner-troubleshoot-btn');
+    if (banner && banner.innerText.includes('SSH LINK DISCONNECTED')) {
+      banner.classList.add('hidden');
+      if (bannerBtn) bannerBtn.classList.add('hidden');
+    }
   }
 
-  if (cpu && cpu.temp >= 85) {
+  if (cpu && cpu.temp != null && cpu.temp >= 85) {
     cpu.throttling = true;
     triggerAlert('CRITICAL', 'CPU Thermal Sensor', `CPU Suhu Kritis (${cpu.temp.toFixed(1)}°C)! Melebihi batas aman 85°C.`, 'Periksa pendingin / Thermal Throttling Aktif');
-  } else if (cpu && cpu.temp >= 75) {
+  } else if (cpu && cpu.temp != null && cpu.temp >= 75) {
     triggerAlert('WARNING', 'CPU Thermal Sensor', `CPU Suhu Meningkat (${cpu.temp.toFixed(1)}°C). Beban kerja tinggi.`, 'Pastikan sirkulasi udara lancar');
   } else if (cpu) {
     cpu.throttling = false;
   }
 
-  if (gpu && gpu.temp >= 84) {
+  if (gpu && gpu.temp != null && gpu.temp >= 84) {
     triggerAlert('CRITICAL', 'GPU Core Sensor', `GPU Suhu Kritis (${gpu.temp.toFixed(1)}°C)!`, 'Tingkatkan fan speed GPU');
   }
 
-  if (fans && fans.cpu && (fans.cpu.stall || (fans.cpu.rpm < 400 && sourceMode !== 'SSH_REMOTE'))) {
+  if (fans && fans.cpu && fans.cpu.rpm != null && (fans.cpu.stall || (fans.cpu.rpm < 400 && sourceMode !== 'SSH_REMOTE'))) {
     triggerAlert('CRITICAL', 'CPU Cooling Fan', `ALARM: Putaran Kipas CPU Berhenti (${fans.cpu.rpm} RPM)!`, 'Periksa konektor PWM fan');
   }
 
-  if (voltages && voltages.v12 < 11.40) {
+  if (voltages && voltages.v12 != null && voltages.v12 < 11.40) {
     triggerAlert('CRITICAL', 'Power Delivery +12V', `VOLTAGE SAG DANGER: Tegangan drop ke ${voltages.v12.toFixed(2)}V (Batas: 11.40V).`, 'Cek adaptor daya / PSU');
   }
 }
@@ -1050,8 +1142,8 @@ function updateUI() {
     pulseRamVal.innerText = `${ramPct.toFixed(1)}%`;
   }
   if (pulseDiskVal) {
-    const stAct = (storage && storage.activity != null) ? storage.activity : 12.4;
-    pulseDiskVal.innerText = `${stAct.toFixed(1)} MB/s`;
+    const stAct = (storage && storage.activity != null) ? storage.activity : 0;
+    pulseDiskVal.innerText = stAct > 0 ? `${stAct.toFixed(1)} MB/s` : '—';
   }
   if (pulseNetVal) {
     const rx = (hardwareState.network && hardwareState.network.rxKbps != null) ? hardwareState.network.rxKbps : 0;
@@ -1059,33 +1151,67 @@ function updateUI() {
   }
   if (globalHealthBadge) {
     if (cpu && cpu.temp >= 85) {
-      globalHealthBadge.className = 'px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse';
+      globalHealthBadge.className = 'badge badge-danger font-mono font-bold';
       globalHealthBadge.innerText = 'CRITICAL THERMAL';
     } else if (cpu && cpu.temp >= 75) {
-      globalHealthBadge.className = 'px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-amber-500/20 text-amber-400 border-amber-500/30';
+      globalHealthBadge.className = 'badge badge-warning font-mono font-bold';
       globalHealthBadge.innerText = 'HIGH LOAD';
     } else if (sourceMode === 'SSH_REMOTE' && sshConfig && !sshConfig.connected) {
-      globalHealthBadge.className = 'px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse';
+      globalHealthBadge.className = 'badge badge-danger font-mono font-bold';
       globalHealthBadge.innerText = 'LINK DISCONNECTED';
     } else {
-      globalHealthBadge.className = 'px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+      globalHealthBadge.className = 'badge badge-success font-mono font-bold';
       globalHealthBadge.innerText = 'SYSTEM OPTIMAL';
     }
   }
 
-  if (connBadge && connText && sshConfig) {
-    if (sourceMode === 'SSH_REMOTE') {
+  const connDot = document.getElementById('connection-status-dot');
+  if (connBadge && connText) {
+    const cpuLoadVal = (cpu && (cpu.loadPct != null ? cpu.loadPct : cpu.load)) != null ? Number(cpu.loadPct != null ? cpu.loadPct : cpu.load) : 0;
+    const ramPctVal = (ramSummary && ramSummary.usedPct != null) ? Number(ramSummary.usedPct) : 0;
+    const diskActVal = (storage && (storage.activityPct != null ? storage.activityPct : storage.activity)) != null ? Number(storage.activityPct != null ? storage.activityPct : storage.activity) : 0;
+    const maxVal = Math.max(cpuLoadVal, ramPctVal);
+
+    if (sourceMode === 'SSH_REMOTE' && sshConfig) {
       if (sshConfig.connected) {
         consecutiveDisconnectCycles = 0;
         lastAutoOpenedNodeId = null;
-        connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-2 shadow';
-        connText.innerText = `SSH CONNECTED (${sshConfig.latencyMs || 0} ms)`;
+        if (maxVal >= 85.0 || diskActVal >= 85.0) {
+          connBadge.className = 'badge badge-danger flex items-center gap-1.5 py-1 px-3';
+          if (connDot) {
+            connDot.className = 'status-dot pulse-fast';
+            connDot.style.backgroundColor = '#DC2626';
+            connDot.style.color = '#DC2626';
+          }
+          connText.innerText = `CRITICAL LOAD (${maxVal.toFixed(0)}%)`;
+        } else if (maxVal >= 70.0 || diskActVal >= 75.0) {
+          connBadge.className = 'badge badge-warning flex items-center gap-1.5 py-1 px-3';
+          if (connDot) {
+            connDot.className = 'status-dot pulse-medium';
+            connDot.style.backgroundColor = '#EAB308';
+            connDot.style.color = '#EAB308';
+          }
+          connText.innerText = `HIGH LOAD (${maxVal.toFixed(0)}%)`;
+        } else {
+          connBadge.className = 'badge badge-success flex items-center gap-1.5 py-1 px-3';
+          if (connDot) {
+            connDot.className = 'status-dot pulse-slow';
+            connDot.style.backgroundColor = '#16A34A';
+            connDot.style.color = '#16A34A';
+          }
+          connText.innerText = `SSH CONNECTED (${sshConfig.latencyMs || 0} ms)`;
+        }
         connBadge.setAttribute('data-tooltip', `Status SSH: Terhubung ke ${sshConfig.targetHost}:${sshConfig.targetPort} (${sshConfig.latencyMs || 0} ms)`);
       } else {
         consecutiveDisconnectCycles++;
-        connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 flex items-center gap-2 animate-pulse shadow cursor-pointer transition';
+        connBadge.className = 'badge badge-danger flex items-center gap-1.5 py-1 px-3 cursor-pointer';
+        if (connDot) {
+          connDot.className = 'status-dot pulse-fast';
+          connDot.style.backgroundColor = '#DC2626';
+          connDot.style.color = '#DC2626';
+        }
         const errDetail = sshConfig.lastError ? ` - ${sshConfig.lastError}` : '';
-        connText.innerText = `🔴 TIMEOUT / RECONNECTING (${sshConfig.targetHost})`;
+        connText.innerText = `TIMEOUT / RECONNECTING (${sshConfig.targetHost})`;
         connBadge.setAttribute('data-tooltip', `Klik di sini untuk Diagnostik Error & Panduan Perbaikan SSH (${sshConfig.targetHost}:${sshConfig.targetPort}${errDetail})`);
 
         // Auto trigger troubleshooting modal on 3rd failure if not opened yet for this node
@@ -1097,82 +1223,185 @@ function updateUI() {
     } else {
       consecutiveDisconnectCycles = 0;
       lastAutoOpenedNodeId = null;
-      connBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center gap-2 shadow';
-      connText.innerText = 'LOCAL HOST ACTIVE';
+      if (maxVal >= 85.0 || diskActVal >= 85.0) {
+        connBadge.className = 'badge badge-danger flex items-center gap-1.5 py-1 px-3';
+        if (connDot) {
+          connDot.className = 'status-dot pulse-fast';
+          connDot.style.backgroundColor = '#DC2626';
+          connDot.style.color = '#DC2626';
+        }
+        connText.innerText = `LOCAL CRITICAL (${maxVal.toFixed(0)}%)`;
+      } else if (maxVal >= 70.0 || diskActVal >= 75.0) {
+        connBadge.className = 'badge badge-warning flex items-center gap-1.5 py-1 px-3';
+        if (connDot) {
+          connDot.className = 'status-dot pulse-medium';
+          connDot.style.backgroundColor = '#EAB308';
+          connDot.style.color = '#EAB308';
+        }
+        connText.innerText = `LOCAL HIGH LOAD (${maxVal.toFixed(0)}%)`;
+      } else {
+        connBadge.className = 'badge badge-success flex items-center gap-1.5 py-1 px-3';
+        if (connDot) {
+          connDot.className = 'status-dot pulse-slow';
+          connDot.style.backgroundColor = '#16A34A';
+          connDot.style.color = '#16A34A';
+        }
+        connText.innerText = 'LOCAL HOST ACTIVE';
+      }
       connBadge.setAttribute('data-tooltip', 'Status: Monitoring Local Host (WMI Direct)');
     }
   }
 
-  // CPU Thermal
+  // Top 5 Processes Consumer Table
+  renderTopProcessesTable(hardwareState.topProcesses);
+
+  // CPU Thermal & Core Voltage
   if (cpu) {
     const cpuTempElem = document.getElementById('cpu-temp-val');
     const cpuCircle = document.getElementById('cpu-temp-circle');
     const cpuBadge = document.getElementById('cpu-status-badge');
     const cpuThrottle = document.getElementById('cpu-throttle');
     const cpuTjmax = document.getElementById('cpu-tjmax');
+    const vcoreVal = document.getElementById('vcore-val');
+    const statCpuAvg = document.getElementById('stat-cpu-avg');
 
-    if (cpuTempElem) cpuTempElem.innerText = cpu.temp.toFixed(1);
+    if (cpuTempElem) {
+      cpuTempElem.innerText = cpu.temp != null ? cpu.temp.toFixed(1) : '—';
+    }
     if (cpuCircle) {
-      cpuCircle.style.strokeDashoffset = calculateGaugeOffset(cpu.temp, 25, 100);
-      const status = getTempStatus(cpu.temp);
-      cpuCircle.style.stroke = status.stroke;
-      if (cpuBadge) {
-        cpuBadge.className = `px-2 py-0.5 rounded text-[10px] font-bold border ${status.badgeBg} ${status.badgeText} ${status.badgeBorder}`;
-        cpuBadge.innerText = status.label;
+      if (cpu.temp != null) {
+        cpuCircle.style.strokeDashoffset = calculateGaugeOffset(cpu.temp, 25, 100);
+        const status = getTempStatus(cpu.temp);
+        cpuCircle.style.stroke = status.stroke;
+        if (cpuBadge) {
+          cpuBadge.className = status.badgeClass;
+          cpuBadge.innerText = status.label;
+        }
+      } else {
+        cpuCircle.style.strokeDashoffset = calculateGaugeOffset(40, 25, 100);
+        if (cpuBadge) {
+          cpuBadge.className = 'badge badge-neutral';
+          cpuBadge.innerText = 'OPTIMAL';
+        }
       }
     }
     if (cpuThrottle) {
-      cpuThrottle.innerText = cpu.throttling ? '⚠️ ACTIVE THROTTLE' : 'No Throttling';
-      cpuThrottle.className = cpu.throttling ? 'font-mono text-rose-400 font-bold animate-pulse' : 'font-mono text-emerald-400';
+      if (cpu.temp != null) {
+        cpuThrottle.innerText = cpu.throttling ? '⚠️ ACTIVE THROTTLE' : 'No Throttling';
+        cpuThrottle.className = cpu.throttling ? 'font-mono text-[#DC2626] font-bold' : 'font-mono text-[#16A34A]';
+      } else {
+        cpuThrottle.innerText = 'Optimal';
+        cpuThrottle.className = 'font-mono text-[#16A34A]';
+      }
     }
-    if (cpuTjmax) cpuTjmax.innerText = `${(cpu.temp + 4.2).toFixed(1)}°C / 100°C`;
+    if (cpuTjmax) {
+      cpuTjmax.innerText = cpu.temp != null ? `${cpu.temp.toFixed(1)}°C / 100°C` : '100°C Max';
+    }
+    if (vcoreVal) {
+      vcoreVal.innerHTML = cpu.vcore != null ? `${cpu.vcore.toFixed(3)} V` : `<span class="text-[#888886] font-normal">N/A</span>`;
+    }
+    const cpuPackagePowerVal = document.getElementById('cpu-package-power-val');
+    if (cpuPackagePowerVal) {
+      const pwr = cpu.power != null ? cpu.power : (voltages && voltages.totalPower != null ? voltages.totalPower : null);
+      cpuPackagePowerVal.innerHTML = pwr != null ? `${pwr.toFixed(1)} W` : `<span class="text-[#888886] font-normal">N/A</span>`;
+    }
+    if (statCpuAvg) {
+      statCpuAvg.innerText = cpu.loadPct != null ? `${cpu.loadPct.toFixed(1)}%` : '—';
+    }
   }
 
-  // GPU Thermal
+  // GPU Thermal & Telemetry
   if (gpu) {
     const gpuTempElem = document.getElementById('gpu-temp-val');
     const gpuCircle = document.getElementById('gpu-temp-circle');
     const gpuBadge = document.getElementById('gpu-status-badge');
     const gpuHotspot = document.getElementById('gpu-hotspot');
     const gpuPower = document.getElementById('gpu-power');
+    const gpu3dLoadHeader = document.getElementById('gpu-3d-load-header');
+    const gpu3dLoadText = document.getElementById('gpu-3d-load-text');
+    const gpuVramUsageText = document.getElementById('gpu-vram-usage-text');
+    const gpuVramBar = document.getElementById('gpu-vram-bar');
 
-    if (gpuTempElem) gpuTempElem.innerText = gpu.temp.toFixed(1);
+    if (gpuTempElem) gpuTempElem.innerText = gpu.temp != null ? gpu.temp.toFixed(1) : '—';
     if (gpuCircle) {
-      gpuCircle.style.strokeDashoffset = calculateGaugeOffset(gpu.temp, 25, 95);
-      const status = getTempStatus(gpu.temp);
-      gpuCircle.style.stroke = status.stroke;
-      if (gpuBadge) {
-        gpuBadge.className = `px-2 py-0.5 rounded text-[10px] font-bold border ${status.badgeBg} ${status.badgeText} ${status.badgeBorder}`;
-        gpuBadge.innerText = status.label;
+      if (gpu.temp != null) {
+        gpuCircle.style.strokeDashoffset = calculateGaugeOffset(gpu.temp, 25, 95);
+        const status = getTempStatus(gpu.temp);
+        gpuCircle.style.stroke = status.stroke;
+        if (gpuBadge) {
+          gpuBadge.className = status.badgeClass;
+          gpuBadge.innerText = status.label;
+        }
+      } else {
+        gpuCircle.style.strokeDashoffset = calculateGaugeOffset(38, 25, 95);
+        if (gpuBadge) {
+          gpuBadge.className = 'badge badge-neutral';
+          gpuBadge.innerText = 'OPTIMAL';
+        }
       }
     }
-    if (gpuHotspot) gpuHotspot.innerText = `${(gpu.hotspotTemp || gpu.temp + 6.0).toFixed(1)}°C / 95°C`;
-    if (gpuPower) gpuPower.innerText = `${(gpu.power || 38.5).toFixed(1)} W`;
+    if (gpuHotspot) gpuHotspot.innerText = gpu.hotspotTemp != null ? `${gpu.hotspotTemp.toFixed(1)}°C / 95°C` : 'N/A';
+    if (gpuPower) gpuPower.innerText = gpu.power != null ? `${gpu.power.toFixed(1)} W` : 'N/A';
+
+    // 3D Engine Load (Header badge & Hardware Profile text)
+    if (gpu3dLoadHeader) {
+      if (gpu.loadPct != null) {
+        gpu3dLoadHeader.innerText = `3D LOAD: ${gpu.loadPct.toFixed(1)}%`;
+        if (gpu.loadPct > 80) {
+          gpu3dLoadHeader.className = 'badge badge-danger font-mono font-bold';
+        } else if (gpu.loadPct > 35) {
+          gpu3dLoadHeader.className = 'badge badge-warning font-mono font-bold';
+        } else {
+          gpu3dLoadHeader.className = 'badge badge-neutral font-mono font-bold';
+        }
+      } else {
+        gpu3dLoadHeader.innerText = '3D LOAD: —%';
+        gpu3dLoadHeader.className = 'badge badge-neutral font-mono font-bold';
+      }
+    }
+    if (gpu3dLoadText) {
+      gpu3dLoadText.innerText = gpu.loadPct != null ? `${gpu.loadPct.toFixed(1)}%` : '—%';
+    }
+
+    // Dedicated VRAM Terpakai
+    if (gpuVramUsageText) {
+      if (gpu.vramUsedGb != null && gpu.vramGb > 0) {
+        const pct = Math.min(100, Math.max(0, (gpu.vramUsedGb / gpu.vramGb) * 100));
+        gpuVramUsageText.innerText = `${gpu.vramUsedGb.toFixed(2)} GB / ${gpu.vramGb.toFixed(1)} GB (${pct.toFixed(0)}%)`;
+        if (gpuVramBar) gpuVramBar.style.width = `${pct}%`;
+      } else if (gpu.vramUsedGb != null) {
+        gpuVramUsageText.innerText = `${gpu.vramUsedGb.toFixed(2)} GB`;
+        if (gpuVramBar) gpuVramBar.style.width = '10%';
+      } else {
+        gpuVramUsageText.innerHTML = `<span class="text-slate-500 font-normal">N/A</span>`;
+        if (gpuVramBar) gpuVramBar.style.width = '0%';
+      }
+    }
   }
 
   // Primary Storage Dial
-  const st = storage || (storageDisks && storageDisks[0]) || { temp: 38.0, health: '100% Good', activity: 12.4 };
+  const st = storage || (storageDisks && storageDisks[0]) || { temp: null, health: 'OK', activity: 0.0 };
   const nvmeTempElem = document.getElementById('nvme-temp-val');
   const nvmeCircle = document.getElementById('nvme-temp-circle');
   const nvmeHealth = document.getElementById('nvme-health');
   const nvmeActivity = document.getElementById('nvme-activity');
 
-  if (nvmeTempElem) nvmeTempElem.innerText = (st.temp || 38.0).toFixed(1);
-  if (nvmeCircle) nvmeCircle.style.strokeDashoffset = calculateGaugeOffset(st.temp || 38.0, 20, 80);
-  if (nvmeHealth) nvmeHealth.innerText = st.health || '100% Good';
-  if (nvmeActivity) nvmeActivity.innerText = `${(st.activity || 12.4).toFixed(1)} MB/s`;
+  if (nvmeTempElem) nvmeTempElem.innerText = (st.temp != null) ? st.temp.toFixed(1) : '—';
+  if (nvmeCircle) nvmeCircle.style.strokeDashoffset = calculateGaugeOffset(st.temp != null ? st.temp : 0, 20, 80);
+  if (nvmeHealth) nvmeHealth.innerText = st.health || 'OK';
+  if (nvmeActivity) nvmeActivity.innerText = `${(st.activity || 0.0).toFixed(1)} MB/s`;
 
   // Motherboard & Ambient
-  const mb = motherboard || { temp: 35.0, vrmTemp: 41.5, ambientTemp: 29.0 };
+  const mb = motherboard || {};
   const mbTempElem = document.getElementById('mb-temp-val');
   const mbCircle = document.getElementById('mb-temp-circle');
   const vrmTempElem = document.getElementById('vrm-temp');
   const ambientTempElem = document.getElementById('ambient-temp');
 
-  if (mbTempElem) mbTempElem.innerText = (mb.temp || 35.0).toFixed(1);
+  if (mbTempElem) mbTempElem.innerHTML = (mb.temp != null) ? `${mb.temp.toFixed(1)}°C` : `<span class="text-slate-500 font-normal text-xs">N/A <span class="text-[10px] text-slate-600">(Sensor N/A)</span></span>`;
   if (mbCircle) mbCircle.style.strokeDashoffset = calculateGaugeOffset(mb.temp || 35.0, 20, 75);
-  if (vrmTempElem) vrmTempElem.innerText = `${(mb.vrmTemp || 41.5).toFixed(1)}°C`;
-  if (ambientTempElem) ambientTempElem.innerText = `${(mb.ambientTemp || 29.0).toFixed(1)}°C`;
+  if (vrmTempElem) vrmTempElem.innerHTML = (mb.vrmTemp != null) ? `${mb.vrmTemp.toFixed(1)}°C` : `<span class="text-slate-500 font-normal text-xs">N/A <span class="text-[10px] text-slate-600">(Chip Super I/O)</span></span>`;
+  if (ambientTempElem) ambientTempElem.innerHTML = (mb.ambientTemp != null) ? `${mb.ambientTemp.toFixed(1)}°C` : `<span class="text-slate-500 font-normal text-xs">N/A <span class="text-[10px] text-slate-600">(Chip Super I/O)</span></span>`;
 
   // Render Dynamic RAM & Storage Sections
   renderDynamicRam(ramModules, ramSummary);
@@ -1183,6 +1412,7 @@ function updateUI() {
     const cpuFanRpm = document.getElementById('cpu-fan-rpm');
     const cpuFanPwm = document.getElementById('cpu-fan-pwm');
     const cpuFanBar = document.getElementById('cpu-fan-bar');
+    const cpuFanStatusBadge = document.getElementById('cpu-fan-status-badge');
     const gpuFanRpm = document.getElementById('gpu-fan-rpm');
     const gpuFanPwm = document.getElementById('gpu-fan-pwm');
     const gpuFanBar = document.getElementById('gpu-fan-bar');
@@ -1192,9 +1422,22 @@ function updateUI() {
     const caseFanPwm = document.getElementById('case-fan-pwm');
     const caseFanBar = document.getElementById('case-fan-bar');
 
-    if (cpuFanRpm) cpuFanRpm.innerText = fans.cpu ? fans.cpu.rpm : '—';
-    if (cpuFanPwm) cpuFanPwm.innerText = `${fans.cpu ? fans.cpu.pwm : 0}%`;
-    if (cpuFanBar) cpuFanBar.style.width = `${fans.cpu ? fans.cpu.pwm : 0}%`;
+    if (cpuFanRpm) {
+      if (fans.cpu && fans.cpu.rpm != null) {
+        cpuFanRpm.innerHTML = `<span class="text-[#0A0A0A] font-bold">${fans.cpu.rpm}</span> <span class="text-xs text-[#888886] font-sans">RPM</span>`;
+        if (cpuFanPwm) cpuFanPwm.innerText = `${fans.cpu.pwm || 0}%`;
+        if (cpuFanBar) cpuFanBar.style.width = `${fans.cpu.pwm || 0}%`;
+        if (cpuFanStatusBadge) cpuFanStatusBadge.innerText = 'Active Cooler';
+      } else {
+        cpuFanRpm.innerHTML = `<span class="text-[#888886] font-bold text-xs">N/A</span> <span class="text-[10px] text-[#888886] font-mono font-normal">(Chip Super I/O N/A)</span>`;
+        if (cpuFanPwm) cpuFanPwm.innerText = `N/A`;
+        if (cpuFanBar) cpuFanBar.style.width = `0%`;
+        if (cpuFanStatusBadge) {
+          cpuFanStatusBadge.innerText = 'Super I/O N/A';
+          cpuFanStatusBadge.setAttribute('data-tooltip', 'Tachometer kipas terhubung ke chip Super I/O motherboard yang memerlukan driver ring-0. Tidak diekspos oleh Windows OS agentless.');
+        }
+      }
+    }
 
     if (gpuFanRpm) {
       if (fans.gpu && (fans.gpu.is_igpu || fans.gpu.has_fan === false)) {
@@ -1211,15 +1454,15 @@ function updateUI() {
         if (gpuFanSubtext) gpuFanSubtext.innerText = 'Dedicated GPU Cooler';
       } else {
         gpuFanRpm.innerHTML = `<span class="text-emerald-300 font-bold">${fans.gpu ? fans.gpu.rpm : '—'}</span> <span class="text-xs text-slate-400 font-sans">RPM</span>`;
-        if (gpuFanPwm) gpuFanPwm.innerText = `${fans.gpu ? fans.gpu.pwm : 0}%`;
-        if (gpuFanBar) gpuFanBar.style.width = `${fans.gpu ? fans.gpu.pwm : 0}%`;
+        if (gpuFanPwm) gpuFanPwm.innerText = `${fans.gpu.pwm || 0}%`;
+        if (gpuFanBar) gpuFanBar.style.width = `${fans.gpu.pwm || 0}%`;
         if (gpuFanIcon) gpuFanIcon.classList.add('fan-icon-spin');
         if (gpuFanSubtext) gpuFanSubtext.innerText = 'Dedicated GPU Cooler';
       }
     }
 
     if (caseFanRpm) {
-      if (fans.case && (fans.case.has_fan === false || fans.case.rpm === 0)) {
+      if (fans.case && (fans.case.has_fan === false || fans.case.rpm === 0 || fans.case.rpm == null)) {
         caseFanRpm.innerHTML = `<span class="text-slate-400 font-bold text-xs">N/A</span> <span class="text-[10px] text-slate-500 font-mono font-normal">(Tidak Terpasang)</span>`;
         if (caseFanPwm) caseFanPwm.innerText = `N/A`;
         if (caseFanBar) caseFanBar.style.width = `0%`;
@@ -1231,28 +1474,35 @@ function updateUI() {
     }
   }
 
-  // Voltages & Power Delivery
+  // Voltages & Power Delivery (Strict reality: N/A if sensor is not exposed)
   if (voltages) {
     const v12Val = document.getElementById('v12-val');
     const v12Badge = document.getElementById('v12-badge');
     const v5Val = document.getElementById('v5-val');
     const v33Val = document.getElementById('v33-val');
-    const vcoreVal = document.getElementById('vcore-val');
     const totalPowerVal = document.getElementById('total-power-val');
 
-    if (v12Val) v12Val.innerText = voltages.v12 != null ? voltages.v12.toFixed(2) : '—';
-    if (v5Val) v5Val.innerText = voltages.v5 != null ? voltages.v5.toFixed(2) : '—';
-    if (v33Val) v33Val.innerText = voltages.v33 != null ? voltages.v33.toFixed(2) : '—';
-    if (vcoreVal) vcoreVal.innerText = voltages.vcore != null ? voltages.vcore.toFixed(2) : '—';
-    if (totalPowerVal) totalPowerVal.innerText = voltages.totalPower != null ? `${voltages.totalPower.toFixed(1)} W` : '—';
+    if (v12Val) v12Val.innerHTML = voltages.v12 != null ? `${voltages.v12.toFixed(2)} V` : `<span class="text-[#888886] font-normal">N/A <span class="text-[10px] text-[#888886]">(Chip Super I/O)</span></span>`;
+    if (v5Val) v5Val.innerHTML = voltages.v5 != null ? `${voltages.v5.toFixed(2)} V` : `<span class="text-[#888886] font-normal">N/A <span class="text-[10px] text-[#888886]">(Chip Super I/O)</span></span>`;
+    if (v33Val) v33Val.innerHTML = voltages.v33 != null ? `${voltages.v33.toFixed(2)} V` : `<span class="text-[#888886] font-normal">N/A <span class="text-[10px] text-[#888886]">(Chip Super I/O)</span></span>`;
+    if (totalPowerVal) {
+      const pwr = voltages.totalPower != null ? voltages.totalPower : (cpu && cpu.power != null ? cpu.power : null);
+      totalPowerVal.innerHTML = pwr != null ? `${pwr.toFixed(1)} W` : `<span class="text-[#888886] font-normal">N/A</span>`;
+    }
 
-    if (v12Badge && voltages.v12 != null) {
-      if (voltages.v12 < 11.40) {
-        v12Badge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 animate-pulse';
-        v12Badge.innerText = 'SAG DANGER';
+    if (v12Badge) {
+      if (voltages.v12 != null) {
+        if (voltages.v12 < 11.40) {
+          v12Badge.className = 'badge badge-danger text-[10px]';
+          v12Badge.innerText = 'SAG DANGER';
+        } else {
+          v12Badge.className = 'badge badge-success text-[10px]';
+          v12Badge.innerText = 'STABLE';
+        }
       } else {
-        v12Badge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400';
-        v12Badge.innerText = 'STABLE';
+        v12Badge.className = 'badge badge-neutral text-[10px]';
+        v12Badge.innerText = 'AGENTLESS N/A';
+        v12Badge.setAttribute('data-tooltip', 'Sensor voltase ATX PSU terhubung ke chip Super I/O motherboard yang memerlukan driver Ring-0 kernel (WinRing0.sys). Tidak dapat dibaca via SSH agentless standar.');
       }
     }
   }
@@ -1308,7 +1558,7 @@ function openProfileModal(nodeId = null) {
       pwdInput.placeholder = node.hasPassword ? '•••••••• (Tersimpan di Vault - isi jika ingin ganti)' : 'Masukkan password SSH baru';
       if (pwdStatus) {
         pwdStatus.innerText = node.hasPassword ? '✓ Tersimpan di Vault' : 'Belum Ada Password';
-        pwdStatus.className = node.hasPassword ? 'text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-normal' : 'text-[10px] px-1.5 py-0.2 rounded bg-slate-700 text-slate-400 font-normal';
+        pwdStatus.className = node.hasPassword ? 'badge badge-success text-[10px]' : 'badge badge-neutral text-[10px]';
       }
 
       if (deleteBtn) {
@@ -1338,7 +1588,7 @@ function openProfileModal(nodeId = null) {
     pwdInput.placeholder = 'Masukkan password SSH perangkat';
     if (pwdStatus) {
       pwdStatus.innerText = 'Password Baru';
-      pwdStatus.className = 'text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-normal';
+      pwdStatus.className = 'badge badge-neutral text-[10px]';
     }
 
     if (deleteBtn) deleteBtn.classList.add('hidden');
@@ -1352,13 +1602,195 @@ function closeProfileModal() {
   if (modal) modal.classList.add('hidden');
 }
 
+// ── DSS-V1 SIGNATURE INTERACTIVE DOT CANVAS (OUTERMOST BACKGROUND) ──
+let requestDotRedraw = null;
+
+function initBackgroundDotCanvas() {
+  const canvas = document.getElementById('bg-dot-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const GAP = 28;
+  const R = 1.5;
+  const R_HOVER = 2.8;
+  const INFLUENCE = 140;
+
+  let mX = -9999;
+  let mY = -9999;
+  let isDirty = true;
+  let idleCount = 0;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    isDirty = true;
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function getThemeColors() {
+    const isDark = (document.documentElement.getAttribute('data-theme') === 'dark') ||
+                   (document.body && document.body.getAttribute('data-theme') === 'dark');
+    if (isDark) {
+      return {
+        base: [40, 40, 40],      // #282828
+        hover: [160, 160, 160]   // #A0A0A0
+      };
+    } else {
+      return {
+        base: [204, 204, 202],   // #CCCCCA
+        hover: [80, 80, 80]      // #505050
+      };
+    }
+  }
+
+  function draw() {
+    if (isDirty || mX > -9000 || idleCount < 15) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const { base: COL_BASE, hover: COL_HOVER } = getThemeColors();
+
+      const cols = Math.ceil(canvas.width / GAP) + 1;
+      const rows = Math.ceil(canvas.height / GAP) + 1;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const x = c * GAP;
+          const y = r * GAP;
+          const dist = Math.hypot(x - mX, y - mY);
+          const t = Math.max(0, 1 - dist / INFLUENCE);
+
+          const radius = lerp(R, R_HOVER, t);
+          const red = Math.round(lerp(COL_BASE[0], COL_HOVER[0], t));
+          const green = Math.round(lerp(COL_BASE[1], COL_HOVER[1], t));
+          const blue = Math.round(lerp(COL_BASE[2], COL_HOVER[2], t));
+
+          ctx.beginPath();
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.fillStyle = `rgb(${red},${green},${blue})`;
+          ctx.fill();
+        }
+      }
+
+      if (mX <= -9000) {
+        idleCount++;
+      } else {
+        idleCount = 0;
+      }
+      isDirty = false;
+    }
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('mousemove', (e) => {
+    mX = e.clientX;
+    mY = e.clientY;
+    isDirty = true;
+  }, { passive: true });
+
+  window.addEventListener('mouseleave', () => {
+    mX = -9999;
+    mY = -9999;
+    isDirty = true;
+  });
+
+  window.addEventListener('resize', resize, { passive: true });
+
+  requestDotRedraw = () => {
+    isDirty = true;
+    idleCount = 0;
+  };
+
+  resize();
+  draw();
+}
+
+// Theme Toggle Controller (DSS-V1 Dark Mode)
+function initTheme() {
+  const savedTheme = localStorage.getItem('dashboard_theme') || 'light';
+  applyTheme(savedTheme);
+  const toggleBtn = document.getElementById('theme-toggle-btn');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme') || 'light';
+      const next = current === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+    });
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  if (document.body) document.body.setAttribute('data-theme', theme);
+  localStorage.setItem('dashboard_theme', theme);
+  const icon = document.getElementById('theme-icon');
+  const text = document.getElementById('theme-text');
+  if (icon) {
+    icon.innerHTML = theme === 'dark' 
+      ? `<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>`
+      : `<svg class="w-3.5 h-3.5 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>`;
+  }
+  if (text) text.innerText = theme === 'dark' ? 'Light' : 'Dark';
+  if (typeof requestDotRedraw === 'function') requestDotRedraw();
+}
+
+// Sidebar Navigation ScrollSpy (Index Dashboard)
+function initSidebarScrollSpy() {
+  const navItems = document.querySelectorAll('.side-navbar .side-nav-item');
+  if (!navItems || navItems.length === 0) return;
+
+  const sections = ['section-system', 'section-cpu', 'section-ram', 'section-gpu', 'section-storage', 'section-power']
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+
+  if ('IntersectionObserver' in window && sections.length > 0) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const id = entry.target.id;
+          navItems.forEach(item => {
+            if (item.getAttribute('data-section') === id) {
+              item.classList.add('active');
+            } else {
+              item.classList.remove('active');
+            }
+          });
+        }
+      });
+    }, {
+      rootMargin: '-15% 0px -60% 0px',
+      threshold: 0
+    });
+
+    sections.forEach(sec => observer.observe(sec));
+  }
+
+  navItems.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetId = item.getAttribute('data-section');
+      const targetEl = document.getElementById(targetId);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        navItems.forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+      }
+    });
+  });
+}
+
 // Initialize and Setup Event Listeners
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  initTheme();
+  initBackgroundDotCanvas();
   initTooltipEngine();
+  initSidebarScrollSpy();
   renderAlertsTable();
   renderOsEventsTable();
-  fetchNodes();
-  updateMetrics();
+  await fetchNodes();
+  await updateMetrics();
 
   // Fast Poller (every 2.0s)
   streamInterval = setInterval(updateMetrics, 2000);
@@ -1377,6 +1809,24 @@ document.addEventListener('DOMContentLoaded', () => {
   if (closeBtn) closeBtn.addEventListener('click', closeProfileModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeProfileModal);
 
+  const viewSetupBtn = document.getElementById('btn-profile-view-setup');
+  if (viewSetupBtn) {
+    viewSetupBtn.addEventListener('click', () => {
+      const name = document.getElementById('modal-node-name').value.trim() || 'Perangkat Target';
+      const host = document.getElementById('modal-node-host').value.trim() || '192.168.27.x';
+      const port = parseInt(document.getElementById('modal-node-port').value) || 22;
+      const user = document.getElementById('modal-node-user').value.trim() || 'windows';
+      openSshTroubleshootModal({
+        name,
+        host,
+        port,
+        user,
+        errorType: 'PANDUAN SETUP',
+        lastError: `Perintah PowerShell Administrator di bawah akan membuka Port ${port} di Windows Firewall dan mengonfigurasi OpenSSH Server pada ${host}.`
+      });
+    });
+  }
+
   // Profile Form Submit (Save / Edit Device)
   const profileForm = document.getElementById('device-profile-form');
   if (profileForm) {
@@ -1393,7 +1843,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const enabled = document.getElementById('modal-node-enabled').checked;
 
       if (feedback) {
-        feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-cyan-500/20 text-cyan-300';
+        feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-[#F4F4F2] text-[#0A0A0A]';
         feedback.innerText = 'Menyimpan profil perangkat ke Vault...';
         feedback.classList.remove('hidden');
       }
@@ -1422,7 +1872,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (res.ok) {
           const resData = await res.json();
-          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-emerald-500/20 text-emerald-300';
+          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-[#F0FDF4] text-[#16A34A]';
           feedback.innerText = '✅ Profil Perangkat Berhasil Disimpan di Vault!';
           triggerAlert('INFO', 'Device Vault', `Profil "${name}" (${host}) berhasil disimpan.`, 'Monitoring siap');
           setTimeout(async () => {
@@ -1431,11 +1881,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (resData.nodeId) await selectNode(resData.nodeId);
           }, 800);
         } else {
-          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-rose-500/20 text-rose-300';
+          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-[#FEF2F2] text-[#DC2626]';
           feedback.innerText = '❌ Gagal menyimpan profil perangkat.';
         }
       } catch (err) {
-        feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-rose-500/20 text-rose-300';
+        feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-[#FEF2F2] text-[#DC2626]';
         feedback.innerText = '❌ Terjadi kesalahan jaringan.';
       }
     });
@@ -1454,7 +1904,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (registeredNodes.length <= 1) {
         if (feedback) {
-          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-amber-500/20 text-amber-300';
+          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-[#FFFBEB] text-[#D97706]';
           feedback.innerText = '⚠️ Minimal harus ada 1 profil perangkat dalam sistem.';
           feedback.classList.remove('hidden');
         }
@@ -1466,7 +1916,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (feedback) {
-        feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-cyan-500/20 text-cyan-300';
+        feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-[#F4F4F2] text-[#0A0A0A]';
         feedback.innerText = 'Menghapus profil perangkat...';
         feedback.classList.remove('hidden');
       }
@@ -1485,14 +1935,14 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         } else {
           if (feedback) {
-            feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-rose-500/20 text-rose-300';
+            feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-[#FEF2F2] text-[#DC2626]';
             feedback.innerText = `❌ ${data.message || 'Gagal menghapus profil.'}`;
             feedback.classList.remove('hidden');
           }
         }
       } catch (err) {
         if (feedback) {
-          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-rose-500/20 text-rose-300';
+          feedback.className = 'text-center text-xs font-semibold py-1.5 rounded bg-[#FEF2F2] text-[#DC2626]';
           feedback.innerText = '❌ Terjadi kesalahan jaringan saat menghapus profil.';
           feedback.classList.remove('hidden');
         }
@@ -1511,8 +1961,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (tabBtnAlerts && tabBtnEvents) {
     tabBtnAlerts.addEventListener('click', () => {
       activeLogTab = 'ALERTS';
-      tabBtnAlerts.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow flex items-center gap-2 transition';
-      tabBtnEvents.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center gap-2 transition';
+      tabBtnAlerts.className = 'filter-pill active';
+      tabBtnEvents.className = 'filter-pill';
       if (tabContentAlerts) tabContentAlerts.classList.remove('hidden');
       if (tabContentEvents) tabContentEvents.classList.add('hidden');
       if (filterBarAlerts) filterBarAlerts.classList.remove('hidden');
@@ -1521,8 +1971,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     tabBtnEvents.addEventListener('click', () => {
       activeLogTab = 'EVENTS';
-      tabBtnEvents.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow flex items-center gap-2 transition';
-      tabBtnAlerts.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center gap-2 transition';
+      tabBtnEvents.className = 'filter-pill active';
+      tabBtnAlerts.className = 'filter-pill';
       if (tabContentAlerts) tabContentAlerts.classList.add('hidden');
       if (tabContentEvents) tabContentEvents.classList.remove('hidden');
       if (filterBarAlerts) filterBarAlerts.classList.add('hidden');
@@ -1534,9 +1984,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.filter-btn').forEach(b => {
-        b.className = 'filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:bg-slate-700/20';
+        b.classList.remove('active');
       });
-      btn.className = 'filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30';
+      btn.classList.add('active');
       activeAlertFilter = btn.getAttribute('data-filter') || 'ALL';
       renderAlertsTable();
     });
@@ -1546,9 +1996,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.evfilter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.evfilter-btn').forEach(b => {
-        b.className = 'evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:bg-slate-700/20';
+        b.classList.remove('active');
       });
-      btn.className = 'evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30';
+      btn.classList.add('active');
       activeEventFilter = btn.getAttribute('data-evfilter') || 'ALL';
       renderOsEventsTable();
     });
@@ -1668,6 +2118,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Banner Troubleshoot Button
+  const bannerTroubleshootBtn = document.getElementById('banner-troubleshoot-btn');
+  if (bannerTroubleshootBtn) {
+    bannerTroubleshootBtn.addEventListener('click', () => {
+      openSshTroubleshootModal(activeNodeId);
+    });
+  }
+
   // Stream Toggle
   const toggleBtn = document.getElementById('toggle-stream-btn');
   if (toggleBtn) {
@@ -1677,8 +2135,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ? `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Stream Active</span>`
         : `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Stream Paused</span>`;
       toggleBtn.className = streamActive
-        ? 'px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-900 font-bold text-xs uppercase tracking-wider shadow-lg shadow-cyan-500/20 transition flex items-center gap-2'
-        : 'px-3.5 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold text-xs uppercase tracking-wider shadow transition flex items-center gap-2';
+        ? 'btn btn-black btn-sm'
+        : 'btn btn-ghost btn-sm';
     });
   }
 

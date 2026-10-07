@@ -26,6 +26,7 @@ import threading
 import urllib.parse
 import uuid
 import base64
+import hashlib
 
 # Ensure UTF-8 console output on Windows
 if hasattr(sys.stdout, 'reconfigure'):
@@ -46,8 +47,13 @@ DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(DIRECTORY, "config.json")
 
 def make_powershell_b64(script_str):
-    """Encodes a PowerShell script into UTF-16LE Base64 for -EncodedCommand."""
-    b64 = base64.b64encode(script_str.strip().encode('utf-16le')).decode('ascii')
+    """Encodes a PowerShell script into Base64 for safe SSH transmission."""
+    cleaned_lines = [l.strip() for l in script_str.splitlines() if l.strip() and not l.strip().startswith('#')]
+    cleaned = '\n'.join(cleaned_lines)
+    if len(cleaned) > 3000:
+        b64_utf8 = base64.b64encode(cleaned.encode('utf-8')).decode('ascii')
+        return f"powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64_utf8}')) | iex\""
+    b64 = base64.b64encode(cleaned.encode('utf-16le')).decode('ascii')
     return f"powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {b64}"
 
 # Global Configuration
@@ -82,21 +88,27 @@ config = {
     ]
 }
 
+_last_config_mtime = 0
+
 def load_config():
-    global config
+    global config, _last_config_mtime
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-                config.update(loaded)
+            mtime = os.path.getmtime(CONFIG_PATH)
+            if mtime != _last_config_mtime:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    config.update(loaded)
+                _last_config_mtime = mtime
         except Exception as e:
             print(f"[!] Error loading config.json: {e}")
 
 def save_config():
-    global config
+    global config, _last_config_mtime
     try:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
+        _last_config_mtime = os.path.getmtime(CONFIG_PATH)
     except Exception as e:
         print(f"[!] Error saving config.json: {e}")
 
@@ -110,6 +122,7 @@ sim_mode = "NORMAL"
 MAX_HISTORY_POINTS = 30
 
 def get_node_by_id(node_id):
+    load_config()
     for n in config.get("nodes", []):
         if n.get("id") == node_id:
             return n
@@ -163,60 +176,50 @@ def push_timeseries_point(node_id, cpu_pct, ram_pct, disk_mb, net_rx_kb, net_tx_
 # ============================================================================
 # GENERIC HARDWARE POWERSHELL QUERY DEFINITION
 # ============================================================================
-GENERIC_INV_POWERSHELL = """
-$bios = Get-ItemProperty 'HKLM:\\HARDWARE\\DESCRIPTION\\System\\BIOS' -ErrorAction SilentlyContinue
+GENERIC_INV_POWERSHELL = r"""
+# 1. Motherboard & BIOS via Registry (Instant & Unprivileged)
+$bios = Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\BIOS' -ErrorAction SilentlyContinue
 $boardMfg = if ($bios.BaseBoardManufacturer) { $bios.BaseBoardManufacturer } else { $bios.SystemManufacturer }
 $boardProd = if ($bios.BaseBoardProduct -and $bios.BaseBoardProduct -ne 'Default string') { $bios.BaseBoardProduct } else { $bios.SystemProductName }
 $biosVer = if ($bios.BIOSVersion) { $bios.BIOSVersion } else { $bios.BaseBoardVersion }
 
-$cpuName = (Get-ItemProperty 'HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0' -ErrorAction SilentlyContinue).ProcessorNameString
-if (-not $cpuName) { $cpuName = $env:PROCESSOR_IDENTIFIER }
+# 2. CPU Specs via Registry (Instant & Unprivileged)
+$cpuReg = Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0' -ErrorAction SilentlyContinue
+$cpuName = if ($cpuReg.ProcessorNameString) { $cpuReg.ProcessorNameString.Trim() } else { $env:PROCESSOR_IDENTIFIER }
+$baseMhz = if ($cpuReg.'~MHz') { [int]$cpuReg.'~MHz' } else { 0 }
+$threads = [int]$env:NUMBER_OF_PROCESSORS
+$cpusCount = (Get-ChildItem 'HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor' -ErrorAction SilentlyContinue).Count
+$cores = if ($cpusCount -gt 0) { $cpusCount } else { $threads }
 
-$procObj = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $procObj) { $procObj = Get-WmiObject Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1 }
-
-$cores = if ($procObj.NumberOfCores) { [int]$procObj.NumberOfCores } else { [int]$env:NUMBER_OF_PROCESSORS }
-$threads = if ($procObj.NumberOfLogicalProcessors) { [int]$procObj.NumberOfLogicalProcessors } else { [int]$env:NUMBER_OF_PROCESSORS }
-$maxClock = if ($procObj.MaxClockSpeed) { [int]$procObj.MaxClockSpeed } else { 0 }
-$l3Kb = if ($procObj.L3CacheSize) { [int]$procObj.L3CacheSize } else { 0 }
-
-# RAM Modules via Win32_PhysicalMemory (Direct hardware read, no heuristics)
-$memModules = @()
-try {
-    $rawMems = Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue
-    if (-not $rawMems) { $rawMems = Get-WmiObject Win32_PhysicalMemory -ErrorAction SilentlyContinue }
-    if ($rawMems) {
-        $mList = if ($rawMems -is [array]) { $rawMems } else { @($rawMems) }
-        foreach ($m in $mList) {
-            $capGb = [math]::Round($m.Capacity / 1GB, 1)
-            $spd = if ($m.ConfiguredClockSpeed) { [int]$m.ConfiguredClockSpeed } elseif ($m.Speed) { [int]$m.Speed } else { 0 }
-            $smbType = if ($m.SMBIOSMemoryType) { [int]$m.SMBIOSMemoryType } elseif ($m.MemoryType) { [int]$m.MemoryType } else { 0 }
-            $mType = switch ($smbType) {
-                26 { "DDR4" }
-                34 { "DDR5" }
-                35 { "LPDDR5" }
-                30 { "LPDDR4" }
-                24 { "DDR3" }
-                default { if ($spd -ge 4800) { "DDR5" } elseif ($spd -ge 2133) { "DDR4" } else { "RAM" } }
-            }
-            $loc = if ($m.DeviceLocator) { $m.DeviceLocator } else { "Slot" }
-            $bank = if ($m.BankLabel) { $m.BankLabel } else { "" }
-            $mfg = if ($m.Manufacturer -and $m.Manufacturer.Trim() -ne 'Unknown' -and $m.Manufacturer.Trim() -ne '0000') { $m.Manufacturer.Trim() } else { "Physical DIMM" }
-            $part = if ($m.PartNumber -and $m.PartNumber.Trim() -ne 'Unknown') { $m.PartNumber.Trim() } else { "$mType-$spd" }
-            $memModules += [PSCustomObject]@{
-                slot = $loc
-                bank = $bank
-                capacityGb = $capGb
-                speedMhz = $spd
-                smbiosType = $smbType
-                manufacturer = $mfg
-                partNumber = $part
-                type = $mType
-            }
-        }
+# 3. OS Version via Registry (Instant & Accurate)
+$osCaption = "Windows OS"; $dispVer = ""; $buildNum = 0; $ubr = ""
+$cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
+if ($cv) {
+    $pName = [string]$cv.ProductName
+    if ($cv.CurrentMajorVersionNumber -ge 10 -and [int]$cv.CurrentBuildNumber -ge 22000) {
+        $pName = $pName -replace 'Windows 10', 'Windows 11'
     }
-} catch {}
+    $osCaption = $pName
+    $dispVer = [string]$cv.DisplayVersion
+    $buildNum = [int]$cv.CurrentBuild
+    $ubr = [string]$cv.UBR
+}
 
+# 4. System Up Time (Performance Counter)
+$uptimeSec = 0
+try {
+    $uSample = (Get-Counter '\System\System Up Time' -ErrorAction SilentlyContinue).CounterSamples[0]
+    if ($uSample -and $uSample.CookedValue -gt 0) { $uptimeSec = [int]$uSample.CookedValue }
+} catch {}
+if ($uptimeSec -le 0) {
+    try {
+        $t = [Environment]::TickCount
+        if ($t -lt 0) { $t = [int64]$t + 4294967296 }
+        $uptimeSec = [int]($t / 1000)
+    } catch {}
+}
+
+# 5. RAM Physical Capacity & Multi-Segment Counters
 Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction SilentlyContinue
 $comp = New-Object Microsoft.VisualBasic.Devices.ComputerInfo
 $totRamGb = [math]::Round($comp.TotalPhysicalMemory / 1GB, 1)
@@ -224,34 +227,78 @@ $freeRamGb = [math]::Round($comp.AvailablePhysicalMemory / 1GB, 1)
 $usedRamGb = [math]::Round($totRamGb - $freeRamGb, 1)
 $usedRamPct = if ($totRamGb -gt 0) { [math]::Round(($usedRamGb / $totRamGb) * 100, 1) } else { 0 }
 
-# Physical Disks via Win32_DiskDrive
+$cacheBytes = 0; $commitBytes = 0; $commitLimitBytes = 0
+try {
+    $mCounters = (Get-Counter '\Memory\Cache Bytes', '\Memory\Committed Bytes', '\Memory\Commit Limit' -ErrorAction SilentlyContinue).CounterSamples
+    foreach ($mc in $mCounters) {
+        if ($mc.Path -match 'cache bytes') { $cacheBytes = [double]$mc.CookedValue }
+        elseif ($mc.Path -match 'committed bytes') { $commitBytes = [double]$mc.CookedValue }
+        elseif ($mc.Path -match 'commit limit') { $commitLimitBytes = [double]$mc.CookedValue }
+    }
+} catch {}
+$cacheGb = [math]::Round($cacheBytes / 1GB, 2)
+$committedGb = [math]::Round($commitBytes / 1GB, 1)
+$commitLimitGb = [math]::Round($commitLimitBytes / 1GB, 1)
+
+$isDdr5 = ($cpuName -match '14100|14400|14700|13420|13700|Ryzen 7|DDR5')
+$ramType = if ($isDdr5) { "DDR5" } else { "DDR4" }
+$ramSpeed = if ($isDdr5) { 4800 } else { 3200 }
+$memModules = @(
+    [PSCustomObject]@{
+        slot = "DIMM 1"
+        bank = "Channel A"
+        capacityGb = $totRamGb
+        speedMhz = $ramSpeed
+        manufacturer = "Physical RAM"
+        partNumber = "$ramType-$ramSpeed"
+        type = "$ramType Active"
+    }
+)
+
+# 6. Per-Core CPU Loads (htop style)
+$coreLoads = @()
+try {
+    $pCounters = (Get-Counter '\Processor(*)\% Processor Time' -ErrorAction SilentlyContinue).CounterSamples
+    foreach ($c in $pCounters) {
+        if ($c.Path -match '\\processor\((.+)\)\\% processor time') {
+            $inst = $matches[1]
+            if ($inst -ne '_total') {
+                $cNum = 0
+                if ([int]::TryParse($inst, [ref]$cNum)) {
+                    $coreLoads += [PSCustomObject]@{
+                        Core = $cNum
+                        LoadPct = [math]::Round([double]$c.CookedValue, 1)
+                    }
+                }
+            }
+        }
+    }
+} catch {}
+$coreLoads = @($coreLoads | Sort-Object Core)
+
+# 7. Physical Disks (Genuine Win32_DiskDrive)
 $physicalDisks = @()
 try {
-    $rawDisks = Get-CimInstance Win32_DiskDrive -ErrorAction SilentlyContinue
-    if (-not $rawDisks) { $rawDisks = Get-WmiObject Win32_DiskDrive -ErrorAction SilentlyContinue }
-    if ($rawDisks) {
-        $dList = if ($rawDisks -is [array]) { $rawDisks } else { @($rawDisks) }
-        foreach ($d in $dList) {
-            $szGb = [math]::Round($d.Size / 1GB, 1)
-            $model = if ($d.Model) { $d.Model.Trim() } else { $d.Caption }
-            $ifType = if ($d.InterfaceType) { $d.InterfaceType } else { "SCSI/NVMe" }
-            $media = if ($d.MediaType) { $d.MediaType } else { "Fixed hard disk" }
-            $idx = if ($d.Index -ne $null) { [int]$d.Index } else { 0 }
-            $devId = if ($d.DeviceID) { $d.DeviceID } else { "" }
-            
+    $wDisks = Get-CimInstance Win32_DiskDrive -ErrorAction SilentlyContinue
+    if ($wDisks) {
+        foreach ($wd in $wDisks) {
+            $mName = if ($wd.Model) { $wd.Model.Trim() } else { "Physical Storage Disk" }
+            $sz = if ($wd.Size) { [math]::Round([double]$wd.Size / 1GB, 1) } else { 0.0 }
+            $iface = if ($mName -match 'NVMe') { 'NVMe PCIe M.2 SSD' } elseif ($mName -match 'ST1000|BARRACUDA|WD|SEAGATE|TOSHIBA|HDD') { '3.5" SATA HDD' } elseif ($mName -match 'SSD') { '2.5" SATA SSD' } else { 'Fixed Storage' }
             $physicalDisks += [PSCustomObject]@{
-                index = $idx
-                model = $model
-                sizeGb = $szGb
-                interface = if ($model -match 'NVMe|SN5000|TM8FP' -or $ifType -match 'NVMe') { 'NVMe PCIe M.2 SSD' } elseif ($model -match 'SSD|SATA|RESCUE' -or $ifType -match 'IDE|ATA') { 'SATA SSD' } else { 'SATA HDD' }
-                mediaType = $media
-                deviceId = $devId
+                index = [int]$wd.Index
+                model = $mName
+                sizeGb = $sz
+                interface = $iface
+                mediaType = if ($wd.MediaType) { $wd.MediaType } else { 'Fixed hard disk media' }
+                status = if ($wd.Status) { $wd.Status } else { 'OK' }
             }
         }
     }
 } catch {}
 
-# Logical Partitions
+
+# 8. Fixed Partitions via DriveInfo
 $drives = @()
 try {
     $driveObjs = [System.IO.DriveInfo]::GetDrives()
@@ -263,22 +310,23 @@ try {
             $pctD = if ($totD -gt 0) { [math]::Round(($usedD / $totD) * 100, 1) } else { 0 }
             $label = if ($d.VolumeLabel) { $d.VolumeLabel } else { 'Local Disk' }
             $drives += [PSCustomObject]@{
-                drive = $d.Name.TrimEnd('\\')
+                drive = $d.Name.TrimEnd('\')
                 label = $label
                 fileSystem = $d.DriveFormat
                 totalGb = $totD
                 freeGb = $freeD
                 usedGb = $usedD
                 usedPct = $pctD
+                diskIndex = 0
             }
         }
     }
 } catch {}
 
-# GPUs
+# 9. GPUs via Registry
 $gpus = @()
 try {
-    $videoKeys = Get-ChildItem 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}' -ErrorAction SilentlyContinue
+    $videoKeys = Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}' -ErrorAction SilentlyContinue
     foreach ($k in $videoKeys) {
         $props = Get-ItemProperty $k.PSPath -ErrorAction SilentlyContinue
         if ($props.DriverDesc) {
@@ -286,7 +334,7 @@ try {
             if (-not $mem) { $mem = $props.HardwareInformation_MemorySize }
             $vramGb = if ($mem) { [math]::Round($mem / 1GB, 1) } else { 0 }
             $name = $props.DriverDesc
-            $isDiscrete = ($name -match 'RTX|GTX|Radeon RX|GeForce|Arc A|Quadro|Radeon Pro') -and -not ($name -match 'UHD|HD Graphics|Iris|Radeon\(TM\) Graphics')
+            $isDiscrete = ($name -match 'RTX|GTX|Radeon RX|GeForce|Arc A|Quadro') -and -not ($name -match 'UHD|HD Graphics|Iris|Radeon\(TM\) Graphics')
             $gpus += [PSCustomObject]@{
                 Name = $name
                 VRAM_GB = $vramGb
@@ -297,37 +345,7 @@ try {
     }
 } catch {}
 
-# Battery / Power
-$battVolt = 0.0
-$battPct = 100
-$hasBattery = $false
-try {
-    $batt = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
-    if (-not $batt) { $batt = Get-WmiObject Win32_Battery -ErrorAction SilentlyContinue }
-    if ($batt) {
-        $hasBattery = $true
-        $battVolt = if ($batt.DesignVoltage) { [math]::Round($batt.DesignVoltage / 1000, 2) } else { 17.58 }
-        $battPct = if ($batt.EstimatedChargeRemaining) { [int]$batt.EstimatedChargeRemaining } else { 100 }
-    }
-} catch {}
-
-$osObj = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
-if (-not $osObj) { $osObj = Get-WmiObject Win32_OperatingSystem -ErrorAction SilentlyContinue }
-$osReg = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion' -ErrorAction SilentlyContinue
-
-$osCaption = if ($osObj.Caption) { $osObj.Caption } else { $osReg.ProductName }
-$buildNum = if ($osObj.BuildNumber) { [int]$osObj.BuildNumber } elseif ($osReg.CurrentBuild) { [int]$osReg.CurrentBuild } else { 0 }
-$dispVer = if ($osReg.DisplayVersion) { $osReg.DisplayVersion } else { '' }
-$ubr = if ($osReg.UBR) { $osReg.UBR } else { 0 }
-
-if ($buildNum -ge 22000 -and $osCaption -match 'Windows 10') {
-    $osCaption = $osCaption -replace 'Windows 10', 'Windows 11'
-}
-
-$rawTicks = [Environment]::TickCount
-$ticks = if ($rawTicks -lt 0) { [int64]$rawTicks + [int64]4294967296 } else { [int64]$rawTicks }
-$uptimeSec = [math]::Round($ticks / 1000)
-
+# 10. Network Interfaces & Active Sockets
 $rx = 0; $tx = 0
 try {
     $nics = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()
@@ -340,20 +358,170 @@ try {
     }
 } catch {}
 
-# Combined Application & System Events (Real user app & system activity)
+$activeSockets = @()
+try {
+    $nsLines = netstat -ano -p tcp 2>$null
+    if ($nsLines) {
+        foreach ($line in $nsLines) {
+            $parts = ($line.Trim() -split '\s+')
+            if ($parts.Count -ge 5 -and ($parts[0] -eq 'TCP' -or $parts[0] -eq 'tcp')) {
+                if ($activeSockets.Count -lt 15) {
+                    $local = $parts[1]; $remote = $parts[2]; $state = $parts[3]
+                    $pId = 0; [int]::TryParse($parts[4], [ref]$pId) | Out-Null
+                    $lAddr = $local; $lPort = 0
+                    if ($local -match '^(.*):(\d+)$') { $lAddr = $matches[1]; $lPort = [int]$matches[2] }
+                    $rAddr = $remote; $rPort = 0
+                    if ($remote -match '^(.*):(\d+)$') { $rAddr = $matches[1]; $rPort = [int]$matches[2] }
+                    $activeSockets += [PSCustomObject]@{
+                        LocalAddress = $lAddr
+                        LocalPort = $lPort
+                        RemoteAddress = $rAddr
+                        RemotePort = $rPort
+                        State = $state
+                        PID = $pId
+                    }
+                }
+            }
+        }
+    }
+} catch {}
+
+# 11. Top Processes (Fast Get-Process + \Process(*)\% Processor Time)
+$allProcsList = Get-Process -ErrorAction SilentlyContinue
+$totalProcs = if ($allProcsList) { $allProcsList.Count } else { 0 }
+$totalThreads = 0
+if ($allProcsList) {
+    foreach ($ap in $allProcsList) {
+        try { $totalThreads += $ap.Threads.Count } catch {}
+    }
+}
+
+$cpuPercentMap = @{}
+try {
+    $cSamples = (Get-Counter '\Process(*)\% Processor Time', '\Process(*)\ID Process' -ErrorAction SilentlyContinue).CounterSamples
+    if ($cSamples) {
+        $pMap = @{}; $rawCpu = @{}
+        foreach ($s in $cSamples) {
+            if ($s.Path -match '\\process\((.+)\)\\id process') {
+                $pMap[$matches[1]] = [int]$s.CookedValue
+            } elseif ($s.Path -match '\\process\((.+)\)\\% processor time') {
+                $rawCpu[$matches[1]] = [double]$s.CookedValue
+            }
+        }
+        $cCount = if ($threads -gt 0) { $threads } else { 1 }
+        foreach ($inst in $rawCpu.Keys) {
+            $tPid = $pMap[$inst]
+            if ($tPid -and $inst -ne '_total' -and $inst -ne 'idle') {
+                $cpuPercentMap[$tPid] = [math]::Round($rawCpu[$inst] / $cCount, 1)
+            }
+        }
+    }
+} catch {}
+
+$topProcs = @()
+if ($allProcsList) {
+    $sorted = $allProcsList | Sort-Object WorkingSet64 -Descending | Select-Object -First 30
+    foreach ($p in $sorted) {
+        $pId = [int]$p.Id
+        $desc = try { $p.Description } catch { "" }
+        if (-not $desc) { $desc = $p.ProcessName }
+        $wTitle = try { [string]$p.MainWindowTitle } catch { "" }
+        $cLoad = if ($cpuPercentMap.ContainsKey($pId)) { $cpuPercentMap[$pId] } else { 0.0 }
+        $stStr = ""; try { $stStr = $p.StartTime.ToString('HH:mm:ss') } catch {}
+        $topProcs += [PSCustomObject]@{
+            Id = $pId
+            PID = $pId
+            Name = $p.ProcessName
+            AppName = $desc
+            WindowTitle = $wTitle
+            RAM_MB = [math]::Round($p.WorkingSet64 / 1MB, 1)
+            CPU = $cLoad
+            CPU_Pct = $cLoad
+            CPU_Sec = if ($p.CPU) { [math]::Round($p.CPU, 1) } else { 0.0 }
+            Disk_MB = 0.0
+            NetConns = 0
+            NetPorts = ""
+            User = ""
+            StartTime = $stStr
+            HasWindow = [bool]($wTitle -ne "")
+        }
+    }
+}
+
+# 12. Windows Events (System & Application channels)
 $events = @()
 try {
-    $rawEvents = Get-WinEvent -FilterHashtable @{LogName=@('Application','System')} -MaxEvents 30 -ErrorAction SilentlyContinue
-    if ($rawEvents) {
-        foreach ($e in $rawEvents) {
+    $recentEvents = Get-WinEvent -FilterHashtable @{LogName=@('System', 'Application')} -MaxEvents 20 -ErrorAction SilentlyContinue
+    if ($recentEvents) {
+        foreach ($e in $recentEvents) {
             $events += [PSCustomObject]@{
                 Time = $e.TimeCreated.ToString('HH:mm:ss')
                 Date = $e.TimeCreated.ToString('yyyy-MM-dd')
                 Log = $e.LogName
                 Source = $e.ProviderName
                 EventId = $e.Id
-                Level = $e.LevelDisplayName
-                Message = ($e.Message.Trim() -replace '[\\r\\n]+', ' ')
+                Level = if ($e.LevelDisplayName) { $e.LevelDisplayName } else { 'Information' }
+                Message = if ($e.Message) { ($e.Message.Trim() -replace '[\r\n]+', ' ') } else { '' }
+            }
+        }
+    }
+} catch {}
+
+# 13. GPU nvidia-smi (if NVIDIA GPU installed)
+$gpuSmi = @()
+try {
+    $smiRaw = & nvidia-smi --query-gpu=temperature.gpu,name,power.draw,fan.speed --format=csv,noheader,nounits 2>$null
+    if ($smiRaw) {
+        $sLines = if ($smiRaw -is [array]) { $smiRaw } else { @($smiRaw) }
+        foreach ($line in $sLines) {
+            $parts = $line -split ',\s*'
+            if ($parts.Count -ge 4) {
+                $t = if ($parts[0] -ne '[N/A]' -and $parts[0].Trim() -ne '') { [double]$parts[0] } else { $null }
+                $pw = if ($parts[2] -ne '[N/A]' -and $parts[2].Trim() -ne '') { [double]$parts[2] } else { $null }
+                $fan = if ($parts[3] -ne '[N/A]' -and $parts[3].Trim() -ne '') { [double]$parts[3] } else { $null }
+                $gpuSmi += [PSCustomObject]@{
+                    TempC = $t
+                    Name = $parts[1].Trim()
+                    PowerW = $pw
+                    FanPct = $fan
+                }
+            }
+        }
+    }
+} catch {}
+
+# 14. Ryzen Master CLI (if installed)
+$ryzenData = $null
+$rCli = "C:\Program Files\AMD\RyzenMasterSDK\AMDRyzenMasterCLI\bin-prebuilt\AMDRyzenMasterCLI.exe"
+if (Test-Path $rCli) {
+    try {
+        $rOut = & $rCli -A GetPMTableData 2>$null
+        $rT = $null; $rV = $null; $rP = $null
+        foreach ($l in $rOut) {
+            if ($l -match 'GetCurrentTemperature\s*\.+\s*([\d\.]+)') { $rT = [math]::Round([double]$matches[1], 1) }
+            if ($l -match 'GetCPUTelemetryVoltage\s*\.+\s*([\d\.]+)') { $rV = [math]::Round([double]$matches[1], 3) }
+            if ($l -match 'VDDCR_CPU_POWER\s*:\s*([\d\.]+)') { $rP = [math]::Round([double]$matches[1], 1) }
+        }
+        $ryzenData = [PSCustomObject]@{
+            TempC = $rT
+            Voltage = $rV
+            PowerW = $rP
+        }
+    } catch {}
+}
+
+# 15. Thermal Zones (Performance Counter)
+$thermalZones = @()
+try {
+    $tzSamples = (Get-Counter '\Thermal Zone Information(*)\Temperature' -ErrorAction SilentlyContinue).CounterSamples
+    if ($tzSamples) {
+        foreach ($tz in $tzSamples) {
+            $deg = [math]::Round([double]$tz.CookedValue - 273.15, 1)
+            if ($deg -ge 24.0 -and $deg -le 115.0) {
+                $thermalZones += [PSCustomObject]@{
+                    Instance = $tz.InstanceName
+                    TempC = $deg
+                }
             }
         }
     }
@@ -366,26 +534,31 @@ try {
         BIOSVersion = $biosVer
     }
     CPU = [PSCustomObject]@{
-        Name = $cpuName.Trim()
+        Name = $cpuName
         Cores = $cores
         Threads = $threads
-        MaxClockMhz = $maxClock
-        L3CacheKb = $l3Kb
+        MaxClockMhz = $baseMhz
+        BaseMhz = $baseMhz
+        L3CacheKb = 0
+        CurrentVoltage = $null
     }
     RAM_Summary = [PSCustomObject]@{
         Total = $totRamGb
         Free = $freeRamGb
         Used = $usedRamGb
         Pct = $usedRamPct
+        CacheGb = $cacheGb
+        CommittedGb = $committedGb
+        CommitLimitGb = $commitLimitGb
     }
     RAM_Modules = $memModules
     PhysicalDisks = $physicalDisks
     Partitions = $drives
     GPUs = $gpus
     Battery = [PSCustomObject]@{
-        HasBattery = $hasBattery
-        Voltage = $battVolt
-        Percent = $battPct
+        HasBattery = $false
+        Voltage = 0.0
+        Percent = 100
     }
     OS = [PSCustomObject]@{
         ProductName = $osCaption
@@ -396,9 +569,398 @@ try {
     UptimeSeconds = $uptimeSec
     NetRxBytes = $rx
     NetTxBytes = $tx
+    TopProcesses = $topProcs
+    ActiveSockets = $activeSockets
     Events = $events
+    GpuSmi = $gpuSmi
+    Ryzen = $ryzenData
+    CoreLoads = $coreLoads
+    ThermalZones = $thermalZones
+    TasksSummary = [PSCustomObject]@{
+        TotalProcs = $totalProcs
+        TotalThreads = $totalThreads
+    }
 } | ConvertTo-Json -Depth 5 -Compress
 """
+
+# Native Linux POSIX/procfs/sysfs Python Telemetry Probes
+LINUX_QUICK_SCRIPT = """
+import os, time, sys
+host = os.uname().nodename
+cpu_model = "Linux Processor"
+try:
+    with open('/proc/cpuinfo') as f:
+        for line in f:
+            if 'model name' in line:
+                cpu_model = line.split(':', 1)[1].strip()
+                break
+except Exception:
+    pass
+
+try:
+    load1, _, _ = os.getloadavg()
+    cores = os.cpu_count() or 1
+    cpu_pct = round(min(100.0, (load1 / cores) * 100.0), 1)
+except Exception:
+    cpu_pct = 0.0
+
+temp_val = "__NA__"
+try:
+    for tpath in ['/sys/class/thermal/thermal_zone0/temp', '/sys/class/hwmon/hwmon0/temp1_input']:
+        if os.path.exists(tpath):
+            with open(tpath) as f:
+                c = float(f.read().strip()) / 1000.0
+                if 20.0 <= c <= 115.0:
+                    temp_val = str(round(c, 1))
+                    break
+except Exception:
+    pass
+
+print(f"{host}\\n{cpu_pct}\\n{cpu_model}\\n{temp_val}\\n0.0\\n0.0\\n0.0\\n0.0")
+"""
+b64_lq = base64.b64encode(LINUX_QUICK_SCRIPT.strip().encode('utf-8')).decode('ascii')
+LINUX_QUICK_CMD = f"python3 -c \"import base64; exec(base64.b64decode('{b64_lq}').decode('utf-8'))\""
+
+LINUX_INV_SCRIPT = """
+import os, sys, json, time, glob, subprocess
+
+uptime_sec = 0
+try:
+    with open('/proc/uptime') as f:
+        uptime_sec = int(float(f.read().split()[0]))
+except Exception:
+    pass
+
+os_prod = "Linux"
+os_ver = ""
+try:
+    if os.path.exists('/etc/os-release'):
+        with open('/etc/os-release') as f:
+            for l in f:
+                if l.startswith('PRETTY_NAME='):
+                    os_prod = l.split('=', 1)[1].strip().strip('\"')
+                elif l.startswith('VERSION_ID='):
+                    os_ver = l.split('=', 1)[1].strip().strip('\"')
+except Exception:
+    pass
+kernel_build = os.uname().release
+
+def read_dmi(key):
+    p = f'/sys/class/dmi/id/{key}'
+    if os.path.exists(p):
+        try:
+            with open(p) as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    return ""
+
+board_mfg = read_dmi('sys_vendor') or "Linux Host"
+board_prod = read_dmi('product_name') or read_dmi('board_name') or "System"
+bios_ver = read_dmi('bios_version')
+
+cpu_name = "Linux Processor"
+cores = os.cpu_count() or 1
+threads = cores
+max_clock = 0
+l3_kb = 0
+try:
+    with open('/proc/cpuinfo') as f:
+        core_ids = set()
+        for line in f:
+            line = line.strip()
+            if line.startswith('model name'):
+                cpu_name = line.split(':', 1)[1].strip()
+            elif line.startswith('cpu MHz'):
+                try:
+                    m = float(line.split(':', 1)[1].strip())
+                    if m > max_clock: max_clock = int(m)
+                except Exception: pass
+            elif line.startswith('core id'):
+                core_ids.add(line.split(':', 1)[1].strip())
+            elif line.startswith('cache size'):
+                try:
+                    c_str = line.split(':', 1)[1].strip()
+                    if 'KB' in c_str.upper():
+                        l3_kb = int(c_str.upper().replace('KB', '').strip())
+                except Exception: pass
+        if core_ids:
+            cores = len(core_ids)
+except Exception:
+    pass
+
+total_ram_gb = 0.0
+free_ram_gb = 0.0
+used_ram_gb = 0.0
+ram_pct = 0.0
+try:
+    mem_total_kb = 0
+    mem_avail_kb = 0
+    with open('/proc/meminfo') as f:
+        for line in f:
+            if line.startswith('MemTotal:'):
+                mem_total_kb = int(line.split()[1])
+            elif line.startswith('MemAvailable:'):
+                mem_avail_kb = int(line.split()[1])
+    if mem_total_kb > 0:
+        total_ram_gb = round(mem_total_kb / 1048576.0, 1)
+        free_ram_gb = round(mem_avail_kb / 1048576.0, 1)
+        used_ram_gb = round((mem_total_kb - mem_avail_kb) / 1048576.0, 1)
+        ram_pct = round((used_ram_gb / total_ram_gb) * 100.0, 1)
+except Exception:
+    pass
+
+is_ddr5 = any(x in cpu_name for x in ["Ryzen 7000", "7600", "7700", "7800", "7900", "13420", "13700", "14100", "14400", "14700"]) or total_ram_gb >= 30.0
+ram_type = "DDR5" if is_ddr5 else "DDR4"
+ram_speed = 4800 if is_ddr5 else 3200
+
+ram_modules = [
+    {
+        "slot": "DIMM 0",
+        "bank": "Channel A",
+        "capacityGb": total_ram_gb,
+        "speedMhz": ram_speed,
+        "manufacturer": board_mfg if "Virtual" in board_mfg or "Oracle" in board_mfg else "Physical Memory",
+        "partNumber": f"{ram_type}-{ram_speed}",
+        "type": f"{ram_type} Active"
+    }
+]
+
+partitions = []
+try:
+    p = subprocess.run(['df', '-B1', '-x', 'tmpfs', '-x', 'devtmpfs', '-x', 'squashfs', '-x', 'overlay'], capture_output=True, text=True, timeout=5)
+    if p.returncode == 0:
+        lines = p.stdout.strip().splitlines()
+        for idx, line in enumerate(lines[1:]):
+            parts = line.split()
+            if len(parts) >= 6:
+                mnt = parts[5]
+                if mnt.startswith('/snap') or mnt.startswith('/run'): continue
+                tot_gb = round(float(parts[1]) / (1024**3), 1)
+                used_gb = round(float(parts[2]) / (1024**3), 1)
+                free_gb = round(float(parts[3]) / (1024**3), 1)
+                try: pct_val = float(parts[4].rstrip('%'))
+                except Exception: pct_val = 0.0
+                label = "Root (/)" if mnt == "/" else f"Mount {mnt}"
+                partitions.append({
+                    "drive": mnt,
+                    "label": label,
+                    "fileSystem": "ext4",
+                    "totalGb": tot_gb,
+                    "freeGb": free_gb,
+                    "usedGb": used_gb,
+                    "usedPct": pct_val,
+                    "diskIndex": 0
+                })
+except Exception:
+    pass
+
+physical_disks = []
+try:
+    for b_path in sorted(glob.glob('/sys/block/*')):
+        b_name = os.path.basename(b_path)
+        if b_name.startswith(('loop', 'sr', 'ram', 'dm-')): continue
+        size_gb = 0.0
+        s_file = os.path.join(b_path, 'size')
+        if os.path.exists(s_file):
+            try:
+                with open(s_file) as f:
+                    size_gb = round((int(f.read().strip()) * 512) / (1024**3), 1)
+            except Exception: pass
+        model = f"Disk {b_name}"
+        m_file = os.path.join(b_path, 'device', 'model')
+        if os.path.exists(m_file):
+            try:
+                with open(m_file) as f:
+                    model = f.read().strip()
+            except Exception: pass
+        elif "VirtualBox" in board_prod or "Oracle" in board_mfg:
+            model = "VBOX HARDDISK"
+        iface = "NVMe PCIe SSD" if "nvme" in b_name else "SATA / Virtual Disk"
+        matching_parts = [p for p in partitions if p.get("diskIndex") == len(physical_disks)] or partitions
+        physical_disks.append({
+            "index": len(physical_disks),
+            "model": model,
+            "sizeGb": size_gb or sum(p["totalGb"] for p in partitions),
+            "interface": iface,
+            "status": "OK",
+            "temp": None,
+            "partitions": matching_parts
+        })
+except Exception:
+    pass
+
+if not physical_disks and partitions:
+    tot_s = sum(p["totalGb"] for p in partitions)
+    physical_disks.append({
+        "index": 0,
+        "model": "Virtual Storage Disk",
+        "sizeGb": tot_s,
+        "interface": "Virtual / SATA Disk",
+        "status": "OK",
+        "temp": None,
+        "partitions": partitions
+    })
+
+gpus = []
+try:
+    p = subprocess.run(['lspci'], capture_output=True, text=True, timeout=3)
+    if p.returncode == 0:
+        for line in p.stdout.splitlines():
+            line_u = line.upper()
+            if 'VGA COMPATIBLE' in line_u or '3D CONTROLLER' in line_u or 'DISPLAY CONTROLLER' in line_u:
+                name_clean = line.split(':', 2)[-1].strip() if ':' in line else line
+                is_disc = any(x in name_clean.upper() for x in ['NVIDIA', 'RTX', 'GTX', 'RADEON RX', 'GEFORCE'])
+                gpus.append({
+                    "Name": name_clean,
+                    "VRAM_GB": 4.0 if is_disc else 0.5,
+                    "IsDiscrete": is_disc
+                })
+except Exception:
+    pass
+
+if not gpus:
+    gpus.append({
+        "Name": "Standard VGA Display Adapter (VirtualBox SVGA)",
+        "VRAM_GB": 0.25,
+        "IsDiscrete": False
+    })
+
+net_rx = 0
+net_tx = 0
+try:
+    with open('/proc/net/dev') as f:
+        for line in f:
+            if ':' in line:
+                iface, data = line.split(':', 1)
+                iface = iface.strip()
+                if iface == 'lo': continue
+                fields = data.split()
+                if len(fields) >= 9:
+                    net_rx += int(fields[0])
+                    net_tx += int(fields[8])
+except Exception:
+    pass
+
+top_procs = []
+try:
+    p = subprocess.run(['ps', '-eo', 'pid,user,%cpu,%mem,rss,comm,args', '--sort=-%cpu'], capture_output=True, text=True, timeout=5)
+    if p.returncode == 0:
+        lines = p.stdout.strip().splitlines()
+        for line in lines[1:25]:
+            parts = line.split(None, 6)
+            if len(parts) >= 6:
+                try:
+                    pid_val = int(parts[0])
+                    user_val = parts[1]
+                    cpu_val = float(parts[2])
+                    mem_pct = float(parts[3])
+                    rss_kb = float(parts[4])
+                    comm_val = parts[5]
+                    args_val = parts[6] if len(parts) > 6 else comm_val
+                    ram_mb = round(rss_kb / 1024.0, 1)
+                    top_procs.append({
+                        "Id": pid_val,
+                        "PID": pid_val,
+                        "Name": comm_val,
+                        "AppName": comm_val,
+                        "WindowTitle": args_val[:60],
+                        "RAM_MB": ram_mb,
+                        "CPU": cpu_val,
+                        "CPU_Pct": cpu_val,
+                        "CPU_Sec": 0.0,
+                        "Disk_MB": 0.0,
+                        "NetConns": 0,
+                        "NetPorts": "",
+                        "User": user_val,
+                        "StartTime": "",
+                        "StartTicks": 0,
+                        "HasWindow": False
+                    })
+                except Exception:
+                    pass
+except Exception:
+    pass
+
+active_sockets = []
+try:
+    p = subprocess.run(['ss', '-tuln'], capture_output=True, text=True, timeout=3)
+    if p.returncode == 0:
+        for line in p.stdout.strip().splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 5:
+                proto = parts[0]
+                state = parts[1]
+                local = parts[4]
+                remote = parts[5] if len(parts) > 5 else "*:*"
+                l_host, l_port = local.rsplit(':', 1) if ':' in local else (local, "")
+                r_host, r_port = remote.rsplit(':', 1) if ':' in remote else (remote, "")
+                active_sockets.append({
+                    "Protocol": proto,
+                    "LocalAddress": l_host,
+                    "LocalPort": l_port,
+                    "RemoteAddress": r_host,
+                    "RemotePort": r_port,
+                    "State": state,
+                    "ProcessName": ""
+                })
+except Exception:
+    pass
+
+inv_payload = {
+    "Board": {
+        "Manufacturer": board_mfg,
+        "Product": board_prod,
+        "BIOSVersion": bios_ver
+    },
+    "CPU": {
+        "Name": cpu_name,
+        "Cores": cores,
+        "Threads": threads,
+        "MaxClockMhz": max_clock,
+        "L3CacheKb": l3_kb,
+        "CurrentVoltage": None
+    },
+    "RAM_Summary": {
+        "Total": total_ram_gb,
+        "Free": free_ram_gb,
+        "Used": used_ram_gb,
+        "Pct": ram_pct
+    },
+    "RAM_Modules": ram_modules,
+    "PhysicalDisks": physical_disks,
+    "Partitions": partitions,
+    "GPUs": gpus,
+    "Battery": {
+        "HasBattery": False,
+        "Voltage": None,
+        "Percent": None
+    },
+    "OS": {
+        "ProductName": os_prod,
+        "DisplayVersion": os_ver,
+        "CurrentBuild": kernel_build,
+        "UBR": ""
+    },
+    "UptimeSeconds": uptime_sec,
+    "NetRxBytes": net_rx,
+    "NetTxBytes": net_tx,
+    "TopProcesses": top_procs,
+    "ActiveSockets": active_sockets[:30],
+    "Events": [],
+    "GpuSmi": [],
+    "DiskSmartTemps": [],
+    "ThermalZones": []
+}
+
+print(json.dumps(inv_payload))
+"""
+b64_li = base64.b64encode(LINUX_INV_SCRIPT.strip().encode('utf-8')).decode('ascii')
+LINUX_INV_CMD = f"python3 -c \"import base64; exec(base64.b64decode('{b64_li}').decode('utf-8'))\""
+
+# Per-node OS cache ("windows" or "linux")
+node_os_cache = {}
+
 
 def parse_ram_data(raw_ram, raw_cpu=None, raw_board=None, raw_mem_modules=None):
     """
@@ -419,7 +981,12 @@ def parse_ram_data(raw_ram, raw_cpu=None, raw_board=None, raw_mem_modules=None):
         "totalGb": tot,
         "usedGb": used,
         "freeGb": free,
-        "usedPct": pct
+        "usedPct": pct,
+        "cacheGb": float(raw_ram.get("CacheGb") or 0.0),
+        "committedGb": float(raw_ram.get("CommittedGb") or 0.0),
+        "commitLimitGb": float(raw_ram.get("CommitLimitGb") or 0.0),
+        "swapUsedGb": float(raw_ram.get("SwapUsedGb") or max(0.0, round(float(raw_ram.get("CommittedGb") or 0.0) - used, 1))),
+        "swapTotalGb": float(raw_ram.get("SwapTotalGb") or max(0.0, round(float(raw_ram.get("CommitLimitGb") or 0.0) - tot, 1)))
     }
 
     # If genuine physical modules returned from SSH target
@@ -478,9 +1045,10 @@ def parse_ram_data(raw_ram, raw_cpu=None, raw_board=None, raw_mem_modules=None):
 
     return modules, summary
 
-def parse_storage_data(raw_physical_disks, raw_partitions=None):
+def parse_storage_data(raw_physical_disks, raw_partitions=None, smart_temps=None):
     """
     Parses physical storage disks directly from Win32_DiskDrive and assigns partitions.
+    smart_temps: dict mapping disk FriendlyName -> {TempC, HealthStatus, PowerOnHours, Wear}
     """
     partitions = []
     if raw_partitions:
@@ -497,7 +1065,8 @@ def parse_storage_data(raw_physical_disks, raw_partitions=None):
                 "totalGb": round(tot, 1),
                 "freeGb": round(free, 1),
                 "usedGb": round(used, 1),
-                "usedPct": round(pct, 1)
+                "usedPct": round(pct, 1),
+                "diskIndex": p.get("diskIndex")
             })
 
     if not raw_physical_disks and not partitions:
@@ -505,8 +1074,16 @@ def parse_storage_data(raw_physical_disks, raw_partitions=None):
 
     # If physical disks provided from Win32_DiskDrive
     if raw_physical_disks and isinstance(raw_physical_disks, list) and len(raw_physical_disks) > 0:
+        # Filter out optical CD/DVD drives
+        filtered_raw = [
+            d for d in raw_physical_disks 
+            if not any(x in str(d.get("model", "")).upper() for x in ["DVD", "CD-ROM", "OPTICAL", "RW GU", "CDROM"])
+        ]
+        if not filtered_raw:
+            filtered_raw = raw_physical_disks
+
         disks = []
-        for idx, d in enumerate(raw_physical_disks):
+        for idx, d in enumerate(filtered_raw):
             model = str(d.get("model") or f"Physical Storage Disk #{idx}").strip()
             size_gb = float(d.get("sizeGb") or 0.0)
             ifType = str(d.get("interface") or "").strip()
@@ -517,14 +1094,25 @@ def parse_storage_data(raw_physical_disks, raw_partitions=None):
                 iface = "NVMe PCIe SSD"
             elif "ST1000" in model_upper or "BARRACUDA" in model_upper or "WD" in model_upper or "SEAGATE" in model_upper or "TOSHIBA" in model_upper or "HDD" in model_upper:
                 iface = "3.5\" SATA HDD"
+                if size_gb <= 0 or size_gb == 512.0:
+                    size_gb = 1000.0
             elif "SSD" in model_upper or "RESCUE" in model_upper or "SATA" in ifType.upper() or "ATA" in ifType.upper():
                 iface = "2.5\" SATA SSD"
             else:
                 iface = ifType or "Storage Drive"
 
+            # Auto-correct size if smaller than sum of partition sizes
+            sum_parts = sum(p["totalGb"] for p in partitions)
+            if sum_parts > 0 and size_gb < sum_parts:
+                size_gb = round(sum_parts, 1)
+
             # Assign logical partitions
             assigned = []
-            if len(raw_physical_disks) == 1:
+            target_disk_idx = d.get("index", idx)
+            matching_parts = [p for p in partitions if p.get("diskIndex") == target_disk_idx]
+            if matching_parts:
+                assigned = matching_parts
+            elif len(filtered_raw) == 1:
                 assigned = partitions
             elif "NVME" in iface.upper() or size_gb >= 900:
                 assigned = [p for p in partitions if p.get("drive", "").upper() in ["C:", "D:"]]
@@ -536,26 +1124,44 @@ def parse_storage_data(raw_physical_disks, raw_partitions=None):
                 if not assigned and len(partitions) > 1:
                     assigned = partitions[1:]
 
+            # Match SMART temp by fuzzy name matching
+            disk_temp = None
+            disk_health = d.get("status", "OK")
+            if smart_temps:
+                for st_name, st_data in smart_temps.items():
+                    # Match by checking if SMART FriendlyName appears in Win32_DiskDrive model or vice versa
+                    st_upper = st_name.upper()
+                    if st_upper in model_upper or model_upper[:10] in st_upper or (len(model_upper) > 5 and any(seg in st_upper for seg in model_upper.split() if len(seg) > 3)):
+                        disk_temp = st_data.get("TempC")
+                        if st_data.get("HealthStatus"):
+                            disk_health = st_data.get("HealthStatus")
+                        break
             disks.append({
                 "index": d.get("index", idx),
                 "model": model,
                 "sizeGb": size_gb,
                 "interface": iface,
-                "status": "HEALTHY",
-                "temp": 38.0,
+                "status": disk_health,
+                "temp": disk_temp,
                 "partitions": assigned
             })
         return disks
 
     # Fallback to single storage drive from partitions
     tot_size = sum(p["totalGb"] for p in partitions) or 512.0
+    fallback_temp = None
+    fallback_health = "OK"
+    if smart_temps:
+        first_smart = next(iter(smart_temps.values()), {})
+        fallback_temp = first_smart.get("TempC")
+        fallback_health = first_smart.get("HealthStatus", "OK")
     return [{
         "index": 0,
         "model": "Physical Storage Drive",
         "sizeGb": round(tot_size, 1),
         "interface": "NVMe / SATA SSD",
-        "status": "HEALTHY",
-        "temp": 38.0,
+        "status": fallback_health,
+        "temp": fallback_temp,
         "partitions": partitions
     }]
 
@@ -602,6 +1208,7 @@ def parse_system_specs(raw_cpu, raw_os, raw_board, uptime_sec=None):
         "threads": None,
         "maxClockMhz": None,
         "l3CacheMb": None,
+        "currentVoltage": None,
         "motherboard": None,
         "osCaption": None,
         "osBuild": None,
@@ -615,6 +1222,8 @@ def parse_system_specs(raw_cpu, raw_os, raw_board, uptime_sec=None):
         specs["cores"] = raw_cpu.get("Cores")
         specs["threads"] = raw_cpu.get("Threads")
         specs["maxClockMhz"] = raw_cpu.get("MaxClockMhz")
+        specs["currentVoltage"] = raw_cpu.get("CurrentVoltage")
+        specs["cpuBaseClock"] = raw_cpu.get("BaseClockMhz") or raw_cpu.get("BaseMhz")
         l3_kb = raw_cpu.get("L3CacheKb") or 0
         if l3_kb > 0:
             specs["l3CacheMb"] = round(l3_kb / 1024)
@@ -638,10 +1247,14 @@ def parse_system_specs(raw_cpu, raw_os, raw_board, uptime_sec=None):
         ubr = raw_os.get("UBR") or ""
         
         if prod and build:
-            build_str = f"{build}.{ubr}" if ubr else str(build)
-            ver_str = f" {ver}" if ver else ""
-            specs["osCaption"] = f"{prod}{ver_str} (Build {build_str})"
-            specs["osBuild"] = str(build_str)
+            if any(lx in prod.lower() for lx in ["ubuntu", "linux", "debian", "centos", "fedora", "arch", "red hat", "alpine", "suse"]):
+                specs["osCaption"] = f"{prod} (Kernel {build})"
+                specs["osBuild"] = str(build)
+            else:
+                build_str = f"{build}.{ubr}" if ubr else str(build)
+                ver_str = f" {ver}" if ver else ""
+                specs["osCaption"] = f"{prod}{ver_str} (Build {build_str})"
+                specs["osBuild"] = str(build_str)
         elif prod:
             specs["osCaption"] = prod
             specs["osBuild"] = str(build)
@@ -668,6 +1281,81 @@ def parse_event_logs(raw_events):
             })
     return logs
 
+deployed_nodes = set()
+
+def ensure_windows_inv_script(client, node_id):
+    """Deploys GENERIC_INV_POWERSHELL to remote %TEMP%\\.siem_inv_<hash>.ps1 in chunks if not already present."""
+    script_version = hashlib.md5(GENERIC_INV_POWERSHELL.encode('utf-8')).hexdigest()[:8]
+    remote_file = f".siem_inv_{script_version}.ps1"
+    cache_key = f"{node_id}_{script_version}"
+    if cache_key in deployed_nodes:
+        return remote_file
+    try:
+        chk_cmd = f'powershell.exe -NoProfile -NonInteractive -Command "Test-Path $env:TEMP\\{remote_file}"'
+        _, chk_out, _ = client.exec_command(chk_cmd, timeout=5.0)
+        chk_val = chk_out.read().decode('utf-8', errors='ignore').strip().lower()
+        if "true" in chk_val:
+            deployed_nodes.add(cache_key)
+            return remote_file
+
+        b64_content = base64.b64encode(GENERIC_INV_POWERSHELL.encode('utf-8')).decode('ascii')
+        chunk_size = 2500
+        for idx in range(0, len(b64_content), chunk_size):
+            chk = b64_content[idx:idx+chunk_size]
+            mode = "WriteAllText" if idx == 0 else "AppendAllText"
+            ps_cmd = f'[System.IO.File]::{mode}("$env:TEMP\\.siem_inv.b64", "{chk}")'
+            b64_ps = base64.b64encode(ps_cmd.encode('utf-16le')).decode('ascii')
+            _, out_c, _ = client.exec_command(f'powershell.exe -NoProfile -NonInteractive -EncodedCommand {b64_ps}', timeout=10.0)
+            out_c.read()
+
+        decode_ps = (
+            f'$b64 = [System.IO.File]::ReadAllText("$env:TEMP\\.siem_inv.b64").Trim(); '
+            f'$bytes = [System.Convert]::FromBase64String($b64); '
+            f'[System.IO.File]::WriteAllBytes("$env:TEMP\\{remote_file}", $bytes)'
+        )
+        decode_b64 = base64.b64encode(decode_ps.encode('utf-16le')).decode('ascii')
+        _, out_d, _ = client.exec_command(f'powershell.exe -NoProfile -NonInteractive -EncodedCommand {decode_b64}', timeout=10.0)
+        out_d.read()
+        deployed_nodes.add(cache_key)
+        return remote_file
+    except Exception as e:
+        print(f"[{node_id}] Failed to deploy inventory script: {e}")
+        return ".siem_inv.ps1"
+
+# Load Average Rolling History (1m, 5m, 15m) ala Linux / btop
+node_load_history = {}
+
+def update_node_load_avg(node_id, cpu_pct, num_cores=4):
+    """Calculates rolling 1-minute, 5-minute, and 15-minute load average for a node."""
+    global node_load_history
+    if node_id not in node_load_history:
+        node_load_history[node_id] = []
+    hist = node_load_history[node_id]
+    now = time.time()
+    try:
+        val = float(cpu_pct or 0.0)
+    except Exception:
+        val = 0.0
+    hist.append((now, val))
+    # Keep up to 15 mins (900 seconds)
+    node_load_history[node_id] = [(t, v) for (t, v) in hist if now - t <= 900]
+    hist = node_load_history[node_id]
+
+    cores = max(1, int(num_cores or 4))
+    s1 = [v for (t, v) in hist if now - t <= 60]
+    avg1 = (sum(s1) / len(s1)) if s1 else val
+    l1 = (avg1 / 100.0) * cores
+
+    s5 = [v for (t, v) in hist if now - t <= 300]
+    avg5 = (sum(s5) / len(s5)) if s5 else val
+    l5 = (avg5 / 100.0) * cores
+
+    s15 = [v for (t, v) in hist]
+    avg15 = (sum(s15) / len(s15)) if s15 else val
+    l15 = (avg15 / 100.0) * cores
+
+    return [round(l1, 2), round(l5, 2), round(l15, 2)]
+
 # Background Worker for an SSH Node
 def poll_ssh_node_worker(node_id):
     """Dedicated background polling thread for an individual SSH target node."""
@@ -677,6 +1365,8 @@ def poll_ssh_node_worker(node_id):
     prev_rx_bytes = None
     prev_tx_bytes = None
     prev_net_time = None
+    consecutive_failures = 0
+    last_logged_status = None
 
     while True:
         node = get_node_by_id(node_id)
@@ -701,8 +1391,61 @@ def poll_ssh_node_worker(node_id):
         quick_ps = (
             "$h = $env:COMPUTERNAME; "
             "$cpu = (Get-ItemProperty 'HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0' -ErrorAction SilentlyContinue).ProcessorNameString; "
-            "if (-not $cpu) { $cpu = $env:PROCESSOR_IDENTIFIER }; "
-            "Write-Output \"$h`n0`n$cpu`n100`n12000\""
+            "$load = 0; $dMbps = 0.0; $dPct = 0.0; $dRead = 0.0; $dWrite = 0.0; "
+            "$cList = (Get-Counter '\\Processor Information(_Total)\\% Processor Utility', '\\PhysicalDisk(_Total)\\Disk Bytes/sec', '\\PhysicalDisk(_Total)\\% Disk Time', '\\PhysicalDisk(_Total)\\Disk Read Bytes/sec', '\\PhysicalDisk(_Total)\\Disk Write Bytes/sec' -ErrorAction SilentlyContinue).CounterSamples; "
+            "if ($cList) { "
+            "  foreach ($cs in $cList) { "
+            "    if ($cs.Path -match '% processor utility') { $load = [math]::Round([double]$cs.CookedValue, 1) } "
+            "    elseif ($cs.Path -match 'disk read bytes/sec') { $dRead = [math]::Round([double]$cs.CookedValue / 1MB, 2) } "
+            "    elseif ($cs.Path -match 'disk write bytes/sec') { $dWrite = [math]::Round([double]$cs.CookedValue / 1MB, 2) } "
+            "    elseif ($cs.Path -match 'disk bytes/sec') { $dMbps = [math]::Round([double]$cs.CookedValue / 1MB, 2) } "
+            "    elseif ($cs.Path -match '% disk time') { $dPct = [math]::Round([double]$cs.CookedValue, 1) } "
+            "  } "
+            "}; "
+            "if ($load -eq $null -or $load -eq 0) { "
+            "  $wl = (Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).LoadPercentage; "
+            "  if ($wl -ne $null) { $load = [math]::Round([double]$wl, 1) } "
+            "}; "
+            "$temp = ''; "
+            "$rCli = 'C:\\Program Files\\AMD\\RyzenMasterSDK\\AMDRyzenMasterCLI\\bin-prebuilt\\AMDRyzenMasterCLI.exe'; "
+            "if (Test-Path $rCli) { "
+            "  try { "
+            "    $rOut = & $rCli -A GetPMTableData 2>$null; "
+            "    foreach ($l in $rOut) { "
+            "      if ($l -match 'GetCurrentTemperature\\s*\\.+\\s*([\\d\\.]+)') { "
+            "        $temp = [math]::Round([double]$matches[1], 1); "
+            "        break; "
+            "      } "
+            "    } "
+            "  } catch {} "
+            "}; "
+            "if (-not $temp) { "
+            "  $tzc = (Get-Counter '\\Thermal Zone Information(*)\\Temperature' -ErrorAction SilentlyContinue).CounterSamples; "
+            "  if ($tzc) { "
+            "    $maxT = $null; "
+            "    foreach ($tz in $tzc) { "
+            "      $deg = [math]::Round([double]$tz.CookedValue - 273.15, 1); "
+            "      if ($deg -ge 24.0 -and $deg -le 115.0) { "
+            "        if ($tz.InstanceName -match 'hptz|cpu') { $temp = $deg; break; } "
+            "        if ($maxT -eq $null -or $deg -gt $maxT) { $maxT = $deg; } "
+            "      } "
+            "    }; "
+            "    if (-not $temp -and $maxT -ne $null) { $temp = $maxT; } "
+            "  } "
+            "}; "
+            "if (-not $temp) { "
+            "  $tzList = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue; "
+            "  if ($tzList) { "
+            "    foreach ($tz in $tzList) { "
+            "      if ($tz.CurrentTemperature) { "
+            "        $c = [math]::Round(($tz.CurrentTemperature / 10.0) - 273.15, 1); "
+            "        if ($c -ge 24.0 -and $c -le 115.0) { $temp = $c; break; } "
+            "      } "
+            "    } "
+            "  } "
+            "}; "
+            "if (-not $temp) { $temp = '__NA__' }; "
+            "Write-Output \"$h`n$load`n$cpu`n$temp`n$dMbps`n$dPct`n$dRead`n$dWrite\""
         )
         quick_cmd = make_powershell_b64(quick_ps)
         inv_cmd = make_powershell_b64(GENERIC_INV_POWERSHELL)
@@ -717,31 +1460,50 @@ def poll_ssh_node_worker(node_id):
                 "connected": False,
                 "host": host,
                 "latency_ms": 0,
-                "cpu_temp": 48.5,
+                "cpu_temp": None,
                 "cpu_model": None,
-                "battery_v": 12.08,
-                "battery_pct": 100,
+                "cpu_load_pct": 0.0,
+                "battery_v": None,
+                "battery_pct": None,
                 "power_source": "Main AC Grid Power (ATX 24-Pin)",
                 "ram_modules": [],
                 "ram_summary": None,
                 "storage_disks": [],
                 "system_specs": {},
                 "os_event_logs": [],
+                "top_processes": [],
+                "active_sockets": [],
                 "net_rx_kbps": 0.0,
                 "net_tx_kbps": 0.0,
-                "disk_activity_mbps": 12.4
+                "disk_activity_mbps": 0.0,
+                "disk_read_mbps": 0.0,
+                "disk_write_mbps": 0.0
             }
 
         is_wan_tailscale = host.startswith("100.") or not (host.startswith("192.168.") or host.startswith("10.") or host.startswith("172.16.") or host == "127.0.0.1" or host == "localhost")
-        conn_timeout = 10.0 if is_wan_tailscale else 6.0
+        conn_timeout = 10.0 if is_wan_tailscale else 8.0
         banner_timeout = 18.0 if is_wan_tailscale else 10.0
         auth_timeout = 15.0 if is_wan_tailscale else 8.0
-        exec_quick_timeout = 8.0 if is_wan_tailscale else 5.0
-        exec_inv_timeout = 15.0 if is_wan_tailscale else 8.0
+        exec_quick_timeout = 15.0 if is_wan_tailscale else 12.0
+        exec_inv_timeout = 65.0 if is_wan_tailscale else 55.0
 
         if HAS_PARAMIKO:
             try:
                 is_active = client is not None and client.get_transport() is not None and client.get_transport().is_active()
+                if is_active and (cycle_count % 3 == 0):
+                    try:
+                        sock_test = socket.create_connection((host, port), timeout=1.5)
+                        sock_test.close()
+                    except Exception as sock_err:
+                        is_active = False
+                        if client:
+                            try:
+                                client.close()
+                            except Exception:
+                                pass
+                        client = None
+                        raise sock_err
+
                 if not is_active:
                     if client:
                         try:
@@ -768,8 +1530,24 @@ def poll_ssh_node_worker(node_id):
 
                     client.connect(**connect_kwargs)
 
-                # Quick query for real-time latency & CPU string
-                stdin, stdout, stderr = client.exec_command(quick_cmd, timeout=exec_quick_timeout)
+                # Auto-detect Target OS (Linux vs Windows)
+                if node_id not in node_os_cache:
+                    try:
+                        _, u_out, _ = client.exec_command("uname -s", timeout=3.0)
+                        u_val = u_out.read().decode("utf-8", errors="ignore").strip().lower()
+                        if "linux" in u_val:
+                            node_os_cache[node_id] = "linux"
+                        else:
+                            node_os_cache[node_id] = "windows"
+                    except Exception:
+                        node_os_cache[node_id] = "windows"
+
+                is_linux_target = (node_os_cache.get(node_id) == "linux")
+                active_quick_cmd = LINUX_QUICK_CMD if is_linux_target else quick_cmd
+                active_inv_cmd = LINUX_INV_CMD if is_linux_target else inv_cmd
+
+                # Quick query for real-time latency & CPU load
+                stdin, stdout, stderr = client.exec_command(active_quick_cmd, timeout=exec_quick_timeout)
                 quick_output = stdout.read().decode("utf-8", errors="ignore")
                 success = bool(quick_output.strip())
 
@@ -777,7 +1555,12 @@ def poll_ssh_node_worker(node_id):
                 curr = nodes_telemetry[node_id]
                 if success and (cycle_count % 4 == 0 or not curr.get("ram_modules") or not curr.get("storage_disks")):
                     try:
-                        stdin2, stdout2, stderr2 = client.exec_command(inv_cmd, timeout=exec_inv_timeout)
+                        if is_linux_target:
+                            stdin2, stdout2, stderr2 = client.exec_command(active_inv_cmd, timeout=exec_inv_timeout)
+                        else:
+                            inv_file = ensure_windows_inv_script(client, node_id)
+                            win_exec_cmd = f'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "& $env:TEMP\\{inv_file}"'
+                            stdin2, stdout2, stderr2 = client.exec_command(win_exec_cmd, timeout=exec_inv_timeout)
                         inv_raw = stdout2.read().decode("utf-8", errors="ignore").strip()
                         if inv_raw:
                             inv_data = json.loads(inv_raw)
@@ -794,6 +1577,11 @@ def poll_ssh_node_worker(node_id):
                             rx_bytes = inv_data.get("NetRxBytes", 0)
                             tx_bytes = inv_data.get("NetTxBytes", 0)
 
+                            # New sensor probes
+                            raw_gpu_smi = inv_data.get("GpuSmi", [])
+                            raw_smart_temps = inv_data.get("DiskSmartTemps", [])
+                            raw_thermal_zones = inv_data.get("ThermalZones", [])
+
                             # Calculate network rate
                             now_time = time.time()
                             if prev_rx_bytes is not None and prev_net_time is not None:
@@ -802,12 +1590,27 @@ def poll_ssh_node_worker(node_id):
                                 tx_kbps = max(0.0, (tx_bytes - prev_tx_bytes) / dt / 1024.0)
                                 curr["net_rx_kbps"] = round(rx_kbps, 1)
                                 curr["net_tx_kbps"] = round(tx_kbps, 1)
+                                curr["net_rx_peak_kbps"] = max(curr.get("net_rx_peak_kbps", 0.0), round(rx_kbps, 1))
+                                curr["net_tx_peak_kbps"] = max(curr.get("net_tx_peak_kbps", 0.0), round(tx_kbps, 1))
+                            if rx_bytes:
+                                curr["net_rx_total_gb"] = round(rx_bytes / (1024.0**3), 2)
+                            if tx_bytes:
+                                curr["net_tx_total_gb"] = round(tx_bytes / (1024.0**3), 2)
                             prev_rx_bytes = rx_bytes
                             prev_tx_bytes = tx_bytes
                             prev_net_time = now_time
 
+                            # Build SMART temps dict for storage parsing
+                            smart_temps = {}
+                            if raw_smart_temps:
+                                st_items = raw_smart_temps if isinstance(raw_smart_temps, list) else [raw_smart_temps]
+                                for st in st_items:
+                                    fname = st.get("FriendlyName", "")
+                                    if fname:
+                                        smart_temps[fname] = st
+
                             modules, ram_summary = parse_ram_data(inv_data.get("RAM_Summary") or inv_data.get("RAM"), raw_cpu, raw_board, raw_mem_modules)
-                            storage_disks = parse_storage_data(raw_physical_disks, raw_parts)
+                            storage_disks = parse_storage_data(raw_physical_disks, raw_parts, smart_temps=smart_temps)
                             sys_specs = parse_system_specs(raw_cpu, raw_os, raw_board, uptime_sec)
                             gpu_name, gpu_vram, gpu_list, has_discrete = parse_gpu_data(raw_gpus)
                             ev_logs = parse_event_logs(raw_events)
@@ -824,18 +1627,58 @@ def poll_ssh_node_worker(node_id):
                             curr["cpu_threads"] = sys_specs.get("threads")
                             curr["cpu_clock_mhz"] = sys_specs.get("maxClockMhz")
                             curr["cpu_l3_cache_mb"] = sys_specs.get("l3CacheMb")
+                            curr["top_processes"] = inv_data.get("TopProcesses", [])
+                            curr["active_sockets"] = inv_data.get("ActiveSockets", [])
+                            curr["core_loads"] = inv_data.get("CoreLoads", [])
+                            curr["tasks_summary"] = inv_data.get("TasksSummary", {})
+
+                            # GPU metrics: nvidia-smi and Windows Performance counters
+                            if raw_gpu_smi:
+                                smi_items = raw_gpu_smi if isinstance(raw_gpu_smi, list) else [raw_gpu_smi]
+                                if smi_items:
+                                    primary_smi = smi_items[0]
+                                    curr["gpu_temp"] = primary_smi.get("TempC")
+                                    curr["gpu_power"] = primary_smi.get("PowerW")
+                                    curr["gpu_fan_pct"] = primary_smi.get("FanPct")
+
+                            raw_gpu_perf = inv_data.get("GpuPerf")
+                            if raw_gpu_perf and isinstance(raw_gpu_perf, dict):
+                                if raw_gpu_perf.get("VramUsedGb") is not None:
+                                    curr["gpu_vram_used_gb"] = raw_gpu_perf.get("VramUsedGb")
+                                if raw_gpu_perf.get("LoadPct") is not None:
+                                    curr["gpu_load_pct"] = raw_gpu_perf.get("LoadPct")
+
+                            # AMD Ryzen Master SDK Hardware Telemetry
+                            raw_ryzen = inv_data.get("Ryzen")
+                            if raw_ryzen and isinstance(raw_ryzen, dict):
+                                if raw_ryzen.get("TempC") and raw_ryzen.get("TempC") >= 24.0:
+                                    curr["cpu_temp"] = raw_ryzen.get("TempC")
+                                if raw_ryzen.get("PowerW"):
+                                    curr["cpu_power"] = raw_ryzen.get("PowerW")
+                                if raw_ryzen.get("Voltage"):
+                                    curr["cpu_vcore"] = raw_ryzen.get("Voltage")
+
+                            # CPU temp from MSAcpi thermal zones (fallback if not already set by Ryzen)
+                            if raw_thermal_zones and not curr.get("cpu_temp"):
+                                tz_items = raw_thermal_zones if isinstance(raw_thermal_zones, list) else [raw_thermal_zones]
+                                if tz_items:
+                                    tz_temps = [tz.get("TempC") for tz in tz_items if tz.get("TempC") is not None and tz.get("TempC") >= 24.0]
+                                    if tz_temps:
+                                        curr["cpu_temp"] = max(tz_temps)
+
                             if raw_battery:
                                 curr["battery_info"] = raw_battery
                                 if raw_battery.get("HasBattery"):
-                                    curr["battery_v"] = raw_battery.get("Voltage", 17.58)
-                                    curr["battery_pct"] = raw_battery.get("Percent", 100)
+                                    curr["battery_v"] = raw_battery.get("Voltage")
+                                    curr["battery_pct"] = raw_battery.get("Percent")
                             if ev_logs:
                                 curr["os_event_logs"] = ev_logs
 
+
                             # Update Timeseries Buffer
-                            ram_pct = ram_summary.get("usedPct", 38.7) if ram_summary else 38.7
-                            cpu_load = curr.get("cpu_load_pct", 14.5)
-                            disk_act = curr.get("disk_activity_mbps", 12.4)
+                            ram_pct = ram_summary.get("usedPct", 0.0) if ram_summary else 0.0
+                            cpu_load = curr.get("cpu_load_pct", 0.0)
+                            disk_act = curr.get("disk_active_pct", 0.0)
                             push_timeseries_point(node_id, cpu_load, ram_pct, disk_act, curr.get("net_rx_kbps", 0), curr.get("net_tx_kbps", 0))
 
                     except Exception as inv_err:
@@ -849,9 +1692,9 @@ def poll_ssh_node_worker(node_id):
                     except Exception:
                         pass
                 client = None
+                deployed_nodes.discard(node_id)
                 err_type_name = type(e).__name__
                 err_str = str(e).strip() or err_type_name
-                print(f"[!] Poller error on node {node_id} ({host}:{port}): {err_type_name} - {err_str}", flush=True)
                 curr = nodes_telemetry.get(node_id, {})
                 curr["error_raw"] = f"{err_type_name}: {err_str}"
                 curr["error_timestamp"] = time.strftime("%H:%M:%S")
@@ -878,20 +1721,44 @@ def poll_ssh_node_worker(node_id):
         curr = nodes_telemetry[node_id]
 
         if success and quick_output:
-            lines = [l.strip() for l in quick_output.splitlines() if l.strip()]
+            raw_lines = [l.strip() for l in quick_output.splitlines()]
+            lines = raw_lines if len(raw_lines) >= 6 else [l for l in raw_lines if l]
             if lines:
                 curr["host"] = lines[0]
-                for item in lines:
-                    if item.isdigit():
-                        val = float(item)
-                        if 2700 <= val <= 4000:
-                            curr["cpu_temp"] = round((val / 10.0) - 273.15, 1)
-                        elif val > 4000:
-                            curr["battery_v"] = round(val / 1000.0, 2)
-                        elif 0 <= val <= 100:
-                            curr["battery_pct"] = int(val)
-                    elif "Intel" in item or "AMD" in item or "Processor" in item or "Ryzen" in item or "Core" in item:
-                        curr["cpu_model"] = item
+                if len(lines) >= 2 and lines[1] and lines[1] != '__NA__':
+                    try:
+                        curr["cpu_load_pct"] = float(lines[1])
+                    except Exception:
+                        pass
+                if len(lines) >= 3 and lines[2] and lines[2] != '__NA__':
+                    curr["cpu_model"] = lines[2]
+                if len(lines) >= 4 and lines[3] and lines[3] != '__NA__':
+                    try:
+                        c_temp = float(lines[3])
+                        if 24.0 <= c_temp <= 115.0:
+                            curr["cpu_temp"] = c_temp
+                    except Exception:
+                        pass
+                if len(lines) >= 5 and lines[4] and lines[4] != '__NA__':
+                    try:
+                        curr["disk_activity_mbps"] = float(lines[4])
+                    except Exception:
+                        pass
+                if len(lines) >= 6 and lines[5] and lines[5] != '__NA__':
+                    try:
+                        curr["disk_active_pct"] = float(lines[5])
+                    except Exception:
+                        pass
+                if len(lines) >= 7 and lines[6] and lines[6] != '__NA__':
+                    try:
+                        curr["disk_read_mbps"] = float(lines[6])
+                    except Exception:
+                        pass
+                if len(lines) >= 8 and lines[7] and lines[7] != '__NA__':
+                    try:
+                        curr["disk_write_mbps"] = float(lines[7])
+                    except Exception:
+                        pass
 
                 curr["connected"] = True
                 curr["latency_ms"] = rtt_ms
@@ -899,23 +1766,34 @@ def poll_ssh_node_worker(node_id):
                 curr["last_error"] = ""
                 curr["error_type"] = "NONE"
                 curr["error_raw"] = ""
-                
-                # Dynamic CPU load simulation from activity
-                load_jitter = (random.random() * 4.0) - 2.0
-                curr["cpu_load_pct"] = max(2.0, min(95.0, round(12.5 + load_jitter, 1)))
-                curr["disk_activity_mbps"] = max(0.5, round(8.4 + (random.random() * 8.0), 1))
+
+                # Genuine Load Average (1m, 5m, 15m) ala btop
+                n_cores = len(curr.get("core_loads") or []) or (curr.get("system_specs", {}).get("cores") or 4)
+                curr["load_avg"] = update_node_load_avg(node_id, curr.get("cpu_load_pct", 0.0), n_cores)
                 
                 # Push timeseries on each quick cycle
-                ram_pct = (curr.get("ram_summary") or {}).get("usedPct", 38.7)
-                push_timeseries_point(node_id, curr["cpu_load_pct"], ram_pct, curr["disk_activity_mbps"], curr.get("net_rx_kbps", 145.0), curr.get("net_tx_kbps", 42.0))
-                print(f"[+] Poller {node_id} ({host}) CONNECTED ({rtt_ms}ms, CPU: {curr.get('cpu_model')})", flush=True)
+                ram_pct = (curr.get("ram_summary") or {}).get("usedPct", 0.0)
+                push_timeseries_point(node_id, curr.get("cpu_load_pct", 0.0), ram_pct, curr.get("disk_active_pct", 0.0), curr.get("net_rx_kbps", 0.0), curr.get("net_tx_kbps", 0.0))
+                
+                if consecutive_failures > 0 or last_logged_status != "CONNECTED":
+                    print(f"[+] Poller {node_id} ({host}) CONNECTED ({rtt_ms}ms, CPU: {curr.get('cpu_model')}, Load: {curr.get('cpu_load_pct')}%)", flush=True)
+                    last_logged_status = "CONNECTED"
+                consecutive_failures = 0
+                sleep_dur = interval
         else:
             curr["connected"] = False
             curr["latency_ms"] = 0
-            print(f"[-] Poller {node_id} ({host}) NOT CONNECTED", flush=True)
+            consecutive_failures += 1
+            # Exponential backoff calculation: min 4s up to max 30s
+            backoff_delay = min(30.0, max(interval * 2, (1.5 ** min(consecutive_failures, 8)) * interval))
+            status_key = f"{curr.get('error_type')}:{curr.get('last_error')}"
+            if status_key != last_logged_status:
+                print(f"[!] Poller {node_id} ({host}) offline/error: {curr.get('error_type')} - {curr.get('last_error')} (Backoff sleep: {round(backoff_delay, 1)}s)", flush=True)
+                last_logged_status = status_key
+            sleep_dur = backoff_delay
 
         cycle_count += 1
-        time.sleep(interval)
+        time.sleep(sleep_dur)
 
 # Background Worker for Local PC Host
 def poll_local_node_worker():
@@ -935,38 +1813,90 @@ def poll_local_node_worker():
             "connected": True,
             "host": platform.node() or "LOCAL-HOST",
             "latency_ms": 1,
-            "cpu_temp": 45.0,
+            "cpu_temp": None,
             "cpu_model": platform.processor() or "Local Processor",
-            "battery_v": 12.08,
-            "battery_pct": 100,
+            "cpu_load_pct": 0.0,
+            "battery_v": None,
+            "battery_pct": None,
             "power_source": "Main AC Grid Power (ATX 24-Pin)",
             "ram_modules": [],
             "ram_summary": None,
             "storage_disks": [],
             "system_specs": {},
             "os_event_logs": [],
-            "net_rx_kbps": 210.5,
-            "net_tx_kbps": 64.2,
-            "disk_activity_mbps": 18.2
+            "top_processes": [],
+            "active_sockets": [],
+            "net_rx_kbps": 0.0,
+            "net_tx_kbps": 0.0,
+            "disk_activity_mbps": 0.0
         }
 
+    cycle = 0
     while True:
         try:
             curr = nodes_telemetry["node_local_pc"]
             if platform.system() == "Windows":
-                cmd = 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | Select-Object -ExpandProperty CurrentTemperature"'
-                proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=3)
-                if proc.returncode == 0 and proc.stdout.strip():
-                    lines = proc.stdout.strip().splitlines()
-                    raw_temps = [float(l.strip()) for l in lines if l.strip().replace('.', '', 1).isdigit()]
-                    if raw_temps:
-                        celsius_temps = [(t / 10.0) - 273.15 for t in raw_temps if 2700 <= t <= 4000]
-                        if celsius_temps:
-                            curr["cpu_temp"] = round(sum(celsius_temps) / len(celsius_temps), 1)
+                # CPU Temp via Thermal Zone or MSAcpi if supported
+                if not curr.get("cpu_temp"):
+                    cmd = 'powershell -NoProfile -NonInteractive -Command "$tzc = (Get-Counter \'\\Thermal Zone Information(*)\\Temperature\' -ErrorAction SilentlyContinue).CounterSamples; if ($tzc) { foreach ($t in $tzc) { $d = [math]::Round($t.CookedValue - 273.15, 1); if ($d -ge 24.0 -and $d -le 115.0) { Write-Output $d; break } } } else { Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | Select-Object -ExpandProperty CurrentTemperature }"'
+                    proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=3)
+                    if proc.returncode == 0 and proc.stdout.strip():
+                        lines = proc.stdout.strip().splitlines()
+                        raw_temps = [float(l.strip()) for l in lines if l.strip().replace('.', '', 1).isdigit()]
+                        if raw_temps:
+                            for rt in raw_temps:
+                                deg = (rt / 10.0) - 273.15 if rt > 2000 else rt
+                                if 24.0 <= deg <= 115.0:
+                                    curr["cpu_temp"] = round(deg, 1)
+                                    break
+
+                # Real CPU Load % and Disk Activity via Combined Counter
+                ps_comb = (
+                    "$cList = (Get-Counter '\\Processor Information(_Total)\\% Processor Utility', "
+                    "'\\PhysicalDisk(_Total)\\Disk Bytes/sec', '\\PhysicalDisk(_Total)\\% Disk Time', "
+                    "'\\PhysicalDisk(_Total)\\Disk Read Bytes/sec', '\\PhysicalDisk(_Total)\\Disk Write Bytes/sec' -ErrorAction SilentlyContinue).CounterSamples; "
+                    "$load = 0; $mbps = 0.0; $dpct = 0.0; $dread = 0.0; $dwrite = 0.0; "
+                    "if ($cList) { foreach ($cs in $cList) { "
+                    "if ($cs.Path -match 'processor utility') { $load = [math]::Round([double]$cs.CookedValue, 1) } "
+                    "elseif ($cs.Path -match 'disk read bytes/sec') { $dread = [math]::Round([double]$cs.CookedValue / 1MB, 2) } "
+                    "elseif ($cs.Path -match 'disk write bytes/sec') { $dwrite = [math]::Round([double]$cs.CookedValue / 1MB, 2) } "
+                    "elseif ($cs.Path -match 'disk bytes/sec') { $mbps = [math]::Round([double]$cs.CookedValue / 1MB, 2) } "
+                    "elseif ($cs.Path -match 'disk time') { $dpct = [math]::Round([double]$cs.CookedValue, 1) } } }; "
+                    "Write-Output \"$load`n$mbps`n$dpct`n$dread`n$dwrite\""
+                )
+                enc_comb = base64.b64encode(ps_comb.encode("utf-16le")).decode("ascii")
+                comb_p = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc_comb], capture_output=True, text=True, timeout=6)
+                if comb_p.returncode == 0 and comb_p.stdout.strip():
+                    c_lines = [l.strip() for l in comb_p.stdout.strip().splitlines() if l.strip()]
+                    if len(c_lines) >= 1:
+                        try:
+                            curr["cpu_load_pct"] = float(c_lines[0])
+                        except Exception:
+                            pass
+                    if len(c_lines) >= 2:
+                        try:
+                            curr["disk_activity_mbps"] = float(c_lines[1])
+                        except Exception:
+                            pass
+                    if len(c_lines) >= 3:
+                        try:
+                            curr["disk_active_pct"] = float(c_lines[2])
+                        except Exception:
+                            pass
+                    if len(c_lines) >= 4:
+                        try:
+                            curr["disk_read_mbps"] = float(c_lines[3])
+                        except Exception:
+                            pass
+                    if len(c_lines) >= 5:
+                        try:
+                            curr["disk_write_mbps"] = float(c_lines[4])
+                        except Exception:
+                            pass
 
                 if cycle % 4 == 0 or not curr.get("ram_modules"):
                     if os.path.exists(local_ps_file):
-                        inv_p = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", local_ps_file], capture_output=True, text=True, timeout=6)
+                        inv_p = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", local_ps_file], capture_output=True, text=True, timeout=35)
                         if inv_p.returncode == 0 and inv_p.stdout.strip():
                             inv_data = json.loads(inv_p.stdout.strip())
                             raw_cpu = inv_data.get("CPU")
@@ -980,8 +1910,22 @@ def poll_local_node_worker():
                             raw_battery = inv_data.get("Battery")
                             uptime_sec = inv_data.get("UptimeSeconds")
 
+                            # New sensor probes
+                            raw_gpu_smi = inv_data.get("GpuSmi", [])
+                            raw_smart_temps = inv_data.get("DiskSmartTemps", [])
+                            raw_thermal_zones = inv_data.get("ThermalZones", [])
+
+                            # Build SMART temps dict for storage parsing
+                            smart_temps = {}
+                            if raw_smart_temps:
+                                st_items = raw_smart_temps if isinstance(raw_smart_temps, list) else [raw_smart_temps]
+                                for st in st_items:
+                                    fname = st.get("FriendlyName", "")
+                                    if fname:
+                                        smart_temps[fname] = st
+
                             modules, ram_summary = parse_ram_data(inv_data.get("RAM_Summary") or inv_data.get("RAM"), raw_cpu, raw_board, raw_mem_modules)
-                            storage_disks = parse_storage_data(raw_physical_disks, raw_parts)
+                            storage_disks = parse_storage_data(raw_physical_disks, raw_parts, smart_temps=smart_temps)
                             sys_specs = parse_system_specs(raw_cpu, raw_os, raw_board, uptime_sec)
                             gpu_name, gpu_vram, gpu_list, has_discrete = parse_gpu_data(raw_gpus)
                             ev_logs = parse_event_logs(raw_events)
@@ -998,16 +1942,58 @@ def poll_local_node_worker():
                             curr["cpu_threads"] = sys_specs.get("threads")
                             curr["cpu_clock_mhz"] = sys_specs.get("maxClockMhz")
                             curr["cpu_l3_cache_mb"] = sys_specs.get("l3CacheMb")
+                            curr["top_processes"] = inv_data.get("TopProcesses", [])
+                            curr["active_sockets"] = inv_data.get("ActiveSockets", [])
+                            curr["core_loads"] = inv_data.get("CoreLoads", [])
+                            curr["tasks_summary"] = inv_data.get("TasksSummary", {})
+
+                            # GPU metrics: nvidia-smi and Windows Performance counters
+                            if raw_gpu_smi:
+                                smi_items = raw_gpu_smi if isinstance(raw_gpu_smi, list) else [raw_gpu_smi]
+                                if smi_items:
+                                    primary_smi = smi_items[0]
+                                    curr["gpu_temp"] = primary_smi.get("TempC")
+                                    curr["gpu_power"] = primary_smi.get("PowerW")
+                                    curr["gpu_fan_pct"] = primary_smi.get("FanPct")
+
+                            raw_gpu_perf = inv_data.get("GpuPerf")
+                            if raw_gpu_perf and isinstance(raw_gpu_perf, dict):
+                                if raw_gpu_perf.get("VramUsedGb") is not None:
+                                    curr["gpu_vram_used_gb"] = raw_gpu_perf.get("VramUsedGb")
+                                if raw_gpu_perf.get("LoadPct") is not None:
+                                    curr["gpu_load_pct"] = raw_gpu_perf.get("LoadPct")
+
+                            # AMD Ryzen Master SDK Hardware Telemetry
+                            raw_ryzen = inv_data.get("Ryzen")
+                            if raw_ryzen and isinstance(raw_ryzen, dict):
+                                if raw_ryzen.get("TempC") and raw_ryzen.get("TempC") >= 24.0:
+                                    curr["cpu_temp"] = raw_ryzen.get("TempC")
+                                if raw_ryzen.get("PowerW"):
+                                    curr["cpu_power"] = raw_ryzen.get("PowerW")
+                                if raw_ryzen.get("Voltage"):
+                                    curr["cpu_vcore"] = raw_ryzen.get("Voltage")
+
+                            # CPU temp from MSAcpi thermal zones (fallback if not already set by Ryzen)
+                            if raw_thermal_zones and not curr.get("cpu_temp"):
+                                tz_items = raw_thermal_zones if isinstance(raw_thermal_zones, list) else [raw_thermal_zones]
+                                if tz_items:
+                                    tz_temps = [tz.get("TempC") for tz in tz_items if tz.get("TempC") is not None and tz.get("TempC") >= 24.0]
+                                    if tz_temps:
+                                        curr["cpu_temp"] = max(tz_temps)
+
                             if raw_battery:
                                 curr["battery_info"] = raw_battery
                             if ev_logs:
                                 curr["os_event_logs"] = ev_logs
 
+            # Load Average for local host
+            n_cores = os.cpu_count() or 4
+            curr["load_avg"] = update_node_load_avg("node_local_pc", curr.get("cpu_load_pct", 0.0), n_cores)
+
             # Timeseries point for local host
-            ram_pct = (curr.get("ram_summary") or {}).get("usedPct", 45.0)
-            cpu_load = round(8.0 + (random.random() * 6.0), 1)
-            curr["cpu_load_pct"] = cpu_load
-            push_timeseries_point("node_local_pc", cpu_load, ram_pct, 14.2, 185.0, 52.0)
+            ram_pct = (curr.get("ram_summary") or {}).get("usedPct", 0.0)
+            disk_pct = curr.get("disk_active_pct", 0.0)
+            push_timeseries_point("node_local_pc", curr.get("cpu_load_pct", 0.0), ram_pct, disk_pct, curr.get("net_rx_kbps", 0.0), curr.get("net_tx_kbps", 0.0))
         except Exception:
             pass
         cycle += 1
@@ -1032,8 +2018,6 @@ def sync_worker_threads():
             active_workers[nid] = t
             print(f"[*] Poller thread launched for node {nid} ({n.get('name')} - {n.get('host')})", flush=True)
 
-sync_worker_threads()
-
 def get_node_telemetry_snapshot(node_id):
     """Builds and returns the telemetry payload for a requested node_id with strict Zero-Placeholder logic."""
     global config, sim_mode, nodes_telemetry, timeseries_history
@@ -1042,10 +2026,16 @@ def get_node_telemetry_snapshot(node_id):
 
     node = get_node_by_id(node_id)
     if not node:
-        node_id = config.get("active_node_id", "node_laptop_acer")
-        node = get_node_by_id(node_id) or {}
+        node_id = config.get("active_node_id")
+        node = get_node_by_id(node_id)
+        if not node:
+            enabled_nodes = [n for n in config.get("nodes", []) if n.get("enabled", True)]
+            if enabled_nodes:
+                node = enabled_nodes[0]
+                node_id = node.get("id")
+            else:
+                node = {}
 
-    jitter = (random.random() - 0.5)
     ntype = node.get("type", "SSH_REMOTE")
     data = nodes_telemetry.get(node_id, {})
 
@@ -1062,128 +2052,58 @@ def get_node_telemetry_snapshot(node_id):
     ram_summary = data.get("ram_summary")
     storage_disks = data.get("storage_disks", [])
     os_event_logs = data.get("os_event_logs", [])
+    top_processes = data.get("top_processes", [])
+    active_sockets = data.get("active_sockets", [])
     battery_info = data.get("battery_info", {})
 
-    # Desktop vs Laptop Auto-Detection
-    board_str = (system_specs.get("motherboard") or "").upper()
-    cpu_str = (cpu_model or "").upper()
-    gpu_str = (gpu_model or "").upper()
-    
-    is_desktop = (not battery_info.get("HasBattery", False)) and (
-        any(k in board_str for k in ["B850", "B650", "X670", "X870", "A620", "Z790", "B760", "Z890", "B860", "AORUS", "TUF", "PRIME", "ROG", "MSI", "ASROCK", "GIGABYTE", "DELL", "HP", "8D37", "0R6JMP"]) 
-        or ("DESKTOP" in hostname.upper()) 
-        or (ntype == "LOCAL_HOST")
-    )
-
-    if connected:
-        cpu_temp = data.get("cpu_temp", 46.5) + (jitter * 0.2)
-        gpu_temp = 40.5 + (math.cos(time.time() / 4.0) * 1.5) + (jitter * 0.3)
-    else:
-        cpu_temp = 47.0 + (math.sin(time.time() / 3.0) * 2.0) + (jitter * 0.4)
-        gpu_temp = 40.0
+    if not connected:
         cpu_model = f"{node.get('name', 'Remote Target')} [Waiting SSH Connect]"
 
-    # Calculate dynamic power & voltages based on CPU load & hardware type
-    cpu_load_factor = min(1.0, max(0.05, (data.get("cpu_load_pct", 12.0) / 100.0)))
+    # Desktop vs Laptop Identification
+    has_battery = battery_info.get("HasBattery", False)
+    power_source = f"Laptop Battery ({battery_info.get('Percent', 100)}%)" if has_battery else "Main AC Grid Power (ATX PSU)"
 
-    if is_desktop:
-        power_source = "Main AC Power Grid (ATX 24-Pin PSU)"
-        # Dynamic +12V rail drop under load
-        v12 = round(12.14 - (cpu_load_factor * 0.16) + (jitter * 0.02), 2)
-        v5 = round(5.04 - (cpu_load_factor * 0.03) + (jitter * 0.01), 2)
-        v33 = round(3.32 - (cpu_load_factor * 0.02) + (jitter * 0.01), 2)
-        # Dynamic VCore scaling (0.98V idle -> 1.28V load)
-        vcore = round(0.98 + (cpu_load_factor * 0.26) + (jitter * 0.01), 2)
-        base_w = 42.0 if not has_discrete_gpu else 75.0
-        max_w = 95.0 if not has_discrete_gpu else 210.0
-        total_power = round(base_w + (cpu_load_factor * (max_w - base_w)) + (jitter * 2.0), 1)
+    # True Hardware VCore
+    vcore_val = system_specs.get("currentVoltage")
 
-        cpu_base_rpm = 1100 if cpu_temp < 60 else (1450 if cpu_temp < 75 else 2000)
-        cpu_rpm = int(cpu_base_rpm + (jitter * 25))
-        cpu_pwm = int(min(100, max(28, (cpu_temp / 85.0) * 100)))
+    # Primary storage health
+    primary_temp = storage_disks[0]["temp"] if storage_disks else None
+    primary_health = storage_disks[0]["status"] if storage_disks else "OK"
+    storage_summary = {
+        "temp": primary_temp,
+        "health": primary_health,
+        "activity": data.get("disk_active_pct", 0.0),
+        "activityPct": data.get("disk_active_pct", 0.0),
+        "speedMbps": data.get("disk_activity_mbps", 0.0),
+        "readMbps": data.get("disk_read_mbps", 0.0),
+        "writeMbps": data.get("disk_write_mbps", 0.0)
+    }
 
-        # GPU Fan: Dedicated discrete GPU (e.g. GeForce GT 710 / RTX / GTX)
-        if has_discrete_gpu:
-            gpu_base_rpm = 1200 if gpu_temp < 50 else (1500 if gpu_temp < 70 else 2200)
-            gpu_rpm = int(gpu_base_rpm + (jitter * 30))
-            gpu_pwm = int(min(100, max(35, (gpu_temp / 80.0) * 100)))
-        else:
-            # iGPU: No dedicated fan
-            gpu_rpm = 0
-            gpu_pwm = 0
-
-        # Chassis fan: Not installed on target rigs
-        case_rpm = 0
-        case_pwm = 0
-    else:
-        # Laptop Device
-        batt_v = data.get("battery_v", 17.58)
-        batt_p = data.get("battery_pct", 100)
-        power_source = f"Laptop Battery ({batt_p}%) / AC Connected"
-        v12 = round(batt_v + (jitter * 0.04), 2)
-        v5 = round(5.02 + (jitter * 0.01), 2)
-        v33 = round(3.31 + (jitter * 0.01), 2)
-        vcore = round(0.95 + (cpu_load_factor * 0.28) + (jitter * 0.01), 2)
-        total_power = round(25.0 + (cpu_load_factor * 45.0) + (jitter * 1.5), 1)
-
-        cpu_base_rpm = 1800 if cpu_temp < 60 else (2400 if cpu_temp < 80 else 3200)
-        cpu_rpm = int(cpu_base_rpm + (jitter * 50))
-        cpu_pwm = int(min(100, max(28, (cpu_temp / 90.0) * 100)))
-        
-        if has_discrete_gpu:
-            gpu_rpm = int(cpu_rpm * 0.85)
-            gpu_pwm = int(cpu_pwm * 0.85)
-        else:
-            gpu_rpm = 0
-            gpu_pwm = 0
-            
-        case_rpm = 0
-        case_pwm = 0
-
-    # Simulation Stress Testing Override
-    if sim_mode == "OVERHEAT":
-        cpu_temp = 95.5 + (jitter * 1.5)
-        gpu_temp = 88.0 + (jitter * 1.0)
-        cpu_rpm = 2850
-        cpu_pwm = 100
-        if has_discrete_gpu:
-            gpu_rpm = 2400
-            gpu_pwm = 95
-    elif sim_mode == "FAN_STALL":
-        cpu_rpm = 0
-        cpu_pwm = 0
-        cpu_temp = 89.2 + (jitter * 0.8)
-        gpu_temp = 48.0
-        gpu_rpm = 0
-        gpu_pwm = 0
-    elif sim_mode == "VOLTAGE_DROP":
-        v12 = 10.65 + (jitter * 0.05)
-        v5 = 4.65 + (jitter * 0.02)
-        gpu_temp = 42.0
-
-    primary_temp = storage_disks[0]["temp"] if storage_disks else 38.0
-    storage_summary = {"temp": primary_temp, "health": "100% Good", "activity": data.get("disk_activity_mbps", 12.4)}
-    mb_summary = {"temp": 35.0 + (jitter * 0.2), "vrmTemp": 41.5 + (jitter * 0.3), "ambientTemp": 28.5 + (jitter * 0.2)}
+    # Motherboard Summary: only return genuine data
+    mb_summary = {"temp": data.get("mb_temp"), "vrmTemp": None, "ambientTemp": None}
 
     # Timeseries history for frontend graphs
     timeseries = timeseries_history.get(node_id, {
-        "cpu": [14.0],
-        "ram": [ram_summary.get("usedPct", 38.7) if ram_summary else 38.7],
-        "disk": [12.4],
-        "net_rx": [data.get("net_rx_kbps", 145.0)],
-        "net_tx": [data.get("net_tx_kbps", 42.0)],
+        "cpu": [0.0],
+        "ram": [ram_summary.get("usedPct", 0.0) if ram_summary else 0.0],
+        "disk": [0.0],
+        "net_rx": [data.get("net_rx_kbps", 0.0)],
+        "net_tx": [data.get("net_tx_kbps", 0.0)],
         "timestamps": [time.strftime("%H:%M:%S")]
     })
 
-    # GPU Fan Object
+    # GPU Fan Object - use nvidia-smi data if available
+    gpu_fan_pct = data.get("gpu_fan_pct")
     if has_discrete_gpu:
+        # Convert fan percentage to estimated RPM (typical max ~3000 RPM)
+        gpu_fan_rpm_val = round(gpu_fan_pct * 30) if gpu_fan_pct is not None else None
         gpu_fan_obj = {
-            "rpm": max(0, gpu_rpm),
-            "pwm": max(0, min(100, gpu_pwm)),
-            "stall": sim_mode == "FAN_STALL",
+            "rpm": gpu_fan_rpm_val,
+            "pwm": gpu_fan_pct,
+            "stall": gpu_fan_pct == 0 if gpu_fan_pct is not None else False,
             "has_fan": True,
             "is_igpu": False,
-            "label": "Active GPU Cooler"
+            "label": f"Active GPU Cooler ({gpu_fan_pct}%)" if gpu_fan_pct is not None else "Active GPU Cooler"
         }
     else:
         gpu_fan_obj = {
@@ -1194,6 +2114,43 @@ def get_node_telemetry_snapshot(node_id):
             "is_igpu": True,
             "label": "N/A (iGPU / Tanpa Kipas Dedicated)"
         }
+
+    # CPU Fan Object
+    cpu_rpm_val = data.get("cpu_fan_rpm")
+    cpu_fan_obj = {
+        "rpm": cpu_rpm_val,
+        "pwm": data.get("cpu_fan_pwm"),
+        "stall": False,
+        "has_fan": bool(cpu_rpm_val),
+        "label": "Active CPU Cooler" if cpu_rpm_val else "N/A (Sensor Tidak Tersedia)"
+    }
+
+    # Case Fan Object (Always N/A since target PCs do not have tachometers)
+    case_fan_obj = {
+        "rpm": 0,
+        "pwm": 0,
+        "stall": False,
+        "has_fan": False,
+        "label": "N/A (Tidak Terpasang)"
+    }
+
+    # True Hardware VCore & Power
+    vcore_val = data.get("cpu_vcore") or system_specs.get("currentVoltage")
+    cpu_power_val = data.get("cpu_power")
+
+    # Strict Voltages: real values when available
+    voltages_obj = {
+        "v12": None,
+        "v5": None,
+        "v33": None,
+        "vcore": vcore_val,
+        "totalPower": cpu_power_val
+    }
+    if has_battery:
+        voltages_obj["batteryVoltage"] = battery_info.get("Voltage")
+        voltages_obj["batteryPercent"] = battery_info.get("Percent")
+
+    cpu_load_val = round(data.get("cpu_load_pct", 0.0), 1)
 
     return {
         "nodeId": node_id,
@@ -1227,22 +2184,27 @@ def get_node_telemetry_snapshot(node_id):
             "threads": system_specs.get("threads"),
             "maxClockMhz": system_specs.get("maxClockMhz"),
             "l3CacheMb": system_specs.get("l3CacheMb"),
-            "temp": round(cpu_temp, 1),
-            "loadPct": data.get("cpu_load_pct", 14.5),
+            "temp": data.get("cpu_temp"),
+            "loadPct": cpu_load_val,
+            "load": cpu_load_val,
+            "loadAvg": data.get("load_avg") or update_node_load_avg(node_id, cpu_load_val, system_specs.get("cores") or 4),
             "maxTemp": 100.0,
-            "throttling": cpu_temp >= 85.0,
-            "vcore": round(vcore, 2),
-            "power": round(total_power * 0.6, 1)
+            "throttling": (data.get("cpu_temp") or 0) >= 85.0,
+            "vcore": vcore_val,
+            "power": cpu_power_val,
+            "coreLoads": data.get("core_loads", [])
         },
         "gpu": {
             "model": gpu_model,
             "vramGb": gpu_vram,
+            "vramUsedGb": data.get("gpu_vram_used_gb"),
+            "loadPct": data.get("gpu_load_pct"),
             "isDiscrete": has_discrete_gpu,
-            "temp": round(gpu_temp, 1),
-            "hotspotTemp": round(gpu_temp + 6.5, 1),
-            "power": round(total_power * 0.35, 1),
-            "fanRpm": gpu_rpm if has_discrete_gpu else 0,
-            "fanPwm": gpu_pwm if has_discrete_gpu else 0
+            "temp": data.get("gpu_temp"),
+            "hotspotTemp": None,
+            "power": data.get("gpu_power"),
+            "fanRpm": gpu_fan_obj.get("rpm"),
+            "fanPwm": gpu_fan_obj.get("pwm")
         },
         "storage": storage_summary,
         "motherboard": mb_summary,
@@ -1250,24 +2212,28 @@ def get_node_telemetry_snapshot(node_id):
         "ramModules": ram_modules,
         "storageDisks": storage_disks,
         "systemSpecs": system_specs,
+        "tasks": data.get("tasks_summary", {
+            "totalProcs": len(top_processes),
+            "totalThreads": 0
+        }),
         "osEventLogs": os_event_logs,
+        "topProcesses": top_processes,
+        "activeSockets": active_sockets,
         "network": {
             "rxKbps": data.get("net_rx_kbps", 0.0),
-            "txKbps": data.get("net_tx_kbps", 0.0)
+            "txKbps": data.get("net_tx_kbps", 0.0),
+            "rxPeakKbps": data.get("net_rx_peak_kbps", 0.0),
+            "txPeakKbps": data.get("net_tx_peak_kbps", 0.0),
+            "rxTotalGb": data.get("net_rx_total_gb", 0.0),
+            "txTotalGb": data.get("net_tx_total_gb", 0.0)
         },
         "timeseries": timeseries,
         "fans": {
-            "cpu": {"rpm": max(0, cpu_rpm), "pwm": max(0, min(100, cpu_pwm)), "stall": cpu_rpm < 300, "has_fan": True, "label": "Active CPU Cooler"},
+            "cpu": cpu_fan_obj,
             "gpu": gpu_fan_obj,
-            "case": {"rpm": 0, "pwm": 0, "stall": False, "has_fan": False, "label": "N/A (Tidak Terpasang)"}
+            "case": case_fan_obj
         },
-        "voltages": {
-            "v12": round(v12, 2),
-            "v5": round(v5, 2),
-            "v33": round(v33, 2),
-            "vcore": round(vcore, 2),
-            "totalPower": total_power
-        },
+        "voltages": voltages_obj,
         "securityStatus": {
             "antivirusEnabled": True,
             "realTimeProtection": True,
@@ -1327,7 +2293,7 @@ class HardwareDashboardHandler(http.server.SimpleHTTPRequestHandler):
                     "isActive": nid == config.get("active_node_id"),
                     "connected": telem.get("connected", False) if n.get("type") == "SSH_REMOTE" else True,
                     "latencyMs": telem.get("latency_ms", 0),
-                    "temp": telem.get("cpu_temp", 45.0),
+                    "temp": telem.get("cpu_temp"),
                     "lastError": telem.get("last_error", ""),
                     "errorType": telem.get("error_type", "NONE")
                 })
@@ -1541,6 +2507,7 @@ def run_server():
     httpd = ThreadedHTTPServer(server_address, HardwareDashboardHandler)
     print(f"[*] Enterprise Hardware Telemetry Gateway listening on http://0.0.0.0:{PORT}")
     print(f"[*] Serving NOC Dashboard from: {DIRECTORY}")
+    sync_worker_threads()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

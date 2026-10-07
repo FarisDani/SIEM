@@ -1,27 +1,31 @@
 <!DOCTYPE html>
-<html lang="id" class="dark">
+<html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Enterprise Hardware Telemetry & Remote SSH NOC Dashboard</title>
+  <title>Hardware Telemetry & Remote SSH NOC Dashboard</title>
   
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      darkMode: 'class',
       theme: {
         extend: {
+          fontFamily: {
+            sans: ['var(--font)', 'sans-serif'],
+            serif: ['var(--font-serif)', 'serif'],
+            mono: ['var(--font-mono)', 'monospace'],
+          },
           colors: {
-            cyber: {
-              900: '#080c14',
-              800: '#0f172a',
-              700: '#1e293b',
-              accent: '#06b6d4',
-              rose: '#f43f5e',
-              emerald: '#10b981',
-              amber: '#f59e0b',
-              purple: '#8b5cf6'
+            dss: {
+              bg: '#F9F9F7',
+              card: '#FFFFFF',
+              muted: '#F4F4F2',
+              border: '#E5E5E3',
+              borderDark: '#D0D0CE',
+              text1: '#0A0A0A',
+              text2: '#4A4A48',
+              text3: '#888886',
             }
           }
         }
@@ -29,99 +33,150 @@
     }
   </script>
 
-  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <!-- Google Fonts: DM Sans, DM Serif Display, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   
-  <!-- Custom Stylesheet -->
+  <!-- Custom DSS-V1 Stylesheet -->
   <link rel="stylesheet" href="styles.css">
 </head>
-<body class="bg-[#080c14] text-slate-100 min-h-screen font-sans antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
+<body class="bg-[#F9F9F7] text-[#0A0A0A] min-h-screen antialiased selection:bg-[#0A0A0A] selection:text-white relative">
 
-  <!-- Background Cyber Grid & Glow Ambient -->
-  <div class="fixed inset-0 pointer-events-none z-0">
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-cyan-900/15 via-transparent to-transparent"></div>
-    <div class="absolute -top-40 -right-40 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl"></div>
-    <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl"></div>
-  </div>
+  <!-- Interactive Dot Canvas Background (Outermost Layer, Behind Everything) -->
+  <canvas id="bg-dot-canvas"></canvas>
 
-  <!-- Global Alert Bar (Overheating / Fan Stall / Voltage Drop Warning Banner) -->
-  <div id="global-alert-banner" class="hidden sticky top-0 z-50 animate-alert-bar py-2.5 px-4 shadow-xl flex items-center justify-between text-white font-mono text-xs border-b border-rose-400/40">
+  <!-- FLOATING SIDEBAR SECTION NAVIGATION (DSS-V1 DOCK) -->
+  <aside class="side-navbar" aria-label="Section Navigation">
+    <a href="#section-system" class="side-nav-item active" data-section="section-system" title="System Platform">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+      </svg>
+      <span class="side-nav-tooltip">System Platform</span>
+    </a>
+    <a href="#section-cpu" class="side-nav-item" data-section="section-cpu" title="CPU Processor">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+      </svg>
+      <span class="side-nav-tooltip">CPU Processor</span>
+    </a>
+    <a href="#section-ram" class="side-nav-item" data-section="section-ram" title="Memory RAM">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+      </svg>
+      <span class="side-nav-tooltip">Memory RAM</span>
+    </a>
+    <a href="#section-gpu" class="side-nav-item" data-section="section-gpu" title="Graphics GPU">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+      </svg>
+      <span class="side-nav-tooltip">Graphics GPU</span>
+    </a>
+    <a href="#section-storage" class="side-nav-item" data-section="section-storage" title="Storage Disks">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path>
+      </svg>
+      <span class="side-nav-tooltip">Storage Disks</span>
+    </a>
+    <a href="#section-power" class="side-nav-item" data-section="section-power" title="Power & Network">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+      </svg>
+      <span class="side-nav-tooltip">Power & Network</span>
+    </a>
+  </aside>
+
+  <!-- Global Alert Bar (Hardware Safety Banner) -->
+  <div id="global-alert-banner" class="hidden sticky top-0 z-50 py-2 px-4 shadow-sm flex items-center justify-between text-white font-mono text-xs bg-[#DC2626] border-b border-[#B91C1C]">
     <div class="flex items-center space-x-3">
-      <span class="p-1 rounded-md bg-white/20 animate-bounce">🚨</span>
-      <span id="global-alert-title" class="font-extrabold uppercase tracking-wide">CRITICAL HARDWARE ANOMALY DETECTED</span>
-      <span class="hidden md:inline-block text-white/80">&bull;</span>
-      <span id="global-alert-msg" class="text-white/90">Suhu CPU melebihi ambang batas aman (>85°C). Sistem dalam status throttling.</span>
+      <span class="p-1 rounded bg-white/20 flex items-center justify-center">
+        <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+        </svg>
+      </span>
+      <span id="global-alert-title" class="font-bold uppercase tracking-wide">CRITICAL HARDWARE ANOMALY</span>
+      <span class="hidden md:inline-block text-white/70">&bull;</span>
+      <span id="global-alert-msg" class="text-white/90">Peringatan anomali hardware terdeteksi.</span>
     </div>
-    <button id="dismiss-alert-btn" class="px-2.5 py-1 rounded bg-black/30 hover:bg-black/50 text-white text-[11px] font-bold transition">Acknowledge</button>
+    <div class="flex items-center space-x-2">
+      <button id="banner-troubleshoot-btn" class="hidden px-2.5 py-0.5 rounded bg-white/20 hover:bg-white/30 text-white text-[11px] font-semibold transition">Diagnostik SSH</button>
+      <button id="dismiss-alert-btn" class="px-2.5 py-0.5 rounded bg-black/30 hover:bg-black/50 text-white text-[11px] font-semibold transition">Acknowledge</button>
+    </div>
   </div>
 
   <!-- Main Container -->
-  <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-6">
+  <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-5">
 
-    <!-- TOP MULTI-DEVICE TAB BAR (ENTERPRISE CONCURRENT NOC TARGETS) -->
-    <section class="glass-card rounded-2xl p-3 border border-cyan-500/30 shadow-2xl bg-slate-900/80">
+    <!-- TOP MULTI-DEVICE TAB BAR -->
+    <section class="card p-3 border border-[#E5E5E3] shadow-sm bg-white">
       <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2">
-          <div class="flex items-center space-x-2 px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700/80">
-            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
-            <span class="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">Device Tabs:</span>
-          </div>
+          <span class="text-xs font-bold uppercase tracking-wider text-[#888886] font-mono mr-1">Endpoints:</span>
           <!-- Dynamic Device Tabs Container -->
           <div id="top-node-tabs-container" class="flex flex-wrap items-center gap-2">
             <!-- Dynamically generated via app.js -->
           </div>
-        </div>
-
-        <!-- Action Controls -->
-        <div class="flex items-center space-x-2">
-          <button id="btn-add-device-profile" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-slate-950 font-extrabold font-mono text-xs transition flex items-center gap-1.5 shadow-lg shadow-cyan-500/20">
-            <span>➕ Tambah Perangkat SSH</span>
+          <button id="btn-add-device-profile" class="btn btn-black btn-sm flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+            <span>Tambah Perangkat SSH</span>
           </button>
-          <button id="btn-manage-profiles" title="Kelola Profil Perangkat Tersimpan" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-cyan-400 border border-slate-700 transition">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <button id="btn-manage-profiles" title="Kelola Profil Perangkat" class="btn btn-ghost btn-sm p-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
             </svg>
           </button>
         </div>
+
+        <!-- Mode Switcher & Theme Toggle -->
+        <div class="flex items-center space-x-2">
+          <button id="theme-toggle-btn" class="btn btn-ghost btn-sm flex items-center gap-1.5" title="Beralih Tema (Dark / Light)">
+            <span id="theme-icon" class="flex items-center">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+              </svg>
+            </span>
+            <span id="theme-text">Dark</span>
+          </button>
+          <a href="siem.html" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm flex items-center gap-1.5" title="Buka SIEM & SOC Operations di tab baru">
+            <span>SIEM Operations ↗</span>
+          </a>
+        </div>
       </div>
     </section>
 
-    <!-- Top Header: Title, Live Status & Active Profile Badge -->
-    <header class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
-      <div class="space-y-1">
-        <div class="flex items-center space-x-3">
-          <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 p-0.5 shadow-lg shadow-cyan-500/20 flex items-center justify-center">
-            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
-            </svg>
-          </div>
-          <div>
-            <h1 class="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
-              <span>Hardware Telemetry NOC</span>
-              <span class="text-xs px-2 py-0.5 rounded-full font-mono bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">PRO V3.5</span>
-            </h1>
-            <p class="text-xs text-slate-400 font-medium">Enterprise Multi-Device Concurrent SSH Monitoring &bull; Component-Centric Architecture &bull; Live Event Stream</p>
-          </div>
+    <!-- Top Header: Title & Live Status -->
+    <header class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pb-3 border-b border-[#E5E5E3]">
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-lg bg-[#0A0A0A] flex items-center justify-center text-white font-bold text-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight text-[#0A0A0A] flex items-center gap-2">
+            <span>Hardware Telemetry NOC</span>
+            <span class="badge badge-neutral text-[11px]">PRO V3.5</span>
+          </h1>
         </div>
       </div>
 
       <!-- Live Active Device Status -->
-      <div class="flex flex-wrap items-center gap-3">
-        <div id="connection-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-2 shadow">
-          <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+      <div class="flex flex-wrap items-center gap-2.5">
+        <div id="connection-badge" class="badge badge-warning flex items-center gap-1.5 py-1 px-3">
+          <span id="connection-status-dot" class="status-dot pulse-slow" style="background-color: #EAB308; color: #EAB308;"></span>
           <span id="connection-status-text">CONNECTING...</span>
         </div>
 
-        <div class="px-3 py-1 rounded-xl bg-slate-900/90 border border-slate-700/80 flex items-center gap-2 font-mono text-xs">
-          <span class="text-slate-400">Target:</span>
-          <span id="active-node-name" class="text-cyan-300 font-bold">Target Device</span>
+        <div class="px-3 py-1 rounded-lg bg-white border border-[#E5E5E3] flex items-center gap-1.5 font-mono text-xs">
+          <span class="text-[#888886]">Target:</span>
+          <span id="active-node-name" class="text-[#0A0A0A] font-bold">Target Device</span>
         </div>
 
-        <button id="toggle-stream-btn" class="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-900 font-bold text-xs uppercase tracking-wider shadow-lg shadow-cyan-500/20 transition flex items-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <button id="toggle-stream-btn" class="btn btn-black btn-sm flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
           </svg>
           <span>Stream Active</span>
@@ -129,208 +184,242 @@
       </div>
     </header>
 
-    <!-- SECTION 0: 💻 SYSTEM PLATFORM -->
-    <section class="glass-card rounded-2xl p-5 border border-cyan-500/30 bg-slate-900/80 space-y-4 shadow-2xl">
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+    <!-- SECTION 0: SYSTEM PLATFORM -->
+    <section id="section-system" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
         <div class="flex items-center space-x-3">
-          <div class="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-xl text-cyan-400">💻</div>
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+            </svg>
+          </div>
           <div>
-            <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <span>SYSTEM PLATFORM</span>
-            </h2>
-            <p class="text-xs text-slate-400 font-medium">Node Identity &bull; UEFI Architecture &bull; Genuine OS Platform</p>
+            <h2 class="text-sm font-bold text-[#0A0A0A]">System Platform</h2>
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <span id="power-source-text" class="px-2.5 py-1 rounded-xl text-xs font-mono bg-slate-800/90 border border-slate-700 text-slate-300 font-bold">AC Power Connected</span>
-          <span id="global-health-badge" class="px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">SYSTEM OPTIMAL</span>
+          <span id="power-source-text" class="badge badge-neutral font-mono text-xs">AC Power</span>
+          <span id="global-health-badge" class="badge badge-success font-mono font-bold">SYSTEM OPTIMAL</span>
         </div>
       </div>
 
       <!-- 4 Platform Identity Columns -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-1 text-xs font-mono">
-          <div class="text-[10px] text-slate-400 font-sans uppercase tracking-wider">Target Hostname</div>
-          <div id="host-name" class="font-black text-cyan-300 text-sm truncate">—</div>
-          <div class="text-[10px] text-slate-500 font-sans">Verified via WMI/SSH</div>
+        <div class="p-3.5 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-1 text-xs font-mono">
+          <div class="text-[10px] text-[#888886] font-bold uppercase tracking-wider">Hostname</div>
+          <div id="host-name" class="font-bold text-[#0A0A0A] text-sm truncate">—</div>
         </div>
 
-        <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-1 text-xs font-mono">
-          <div class="text-[10px] text-slate-400 font-sans uppercase tracking-wider">Motherboard / BIOS</div>
-          <div id="mb-model-text" class="font-bold text-slate-200 truncate">—</div>
-          <div class="text-[10px] text-slate-500 font-sans">UEFI x64 Firmware</div>
+        <div class="p-3.5 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-1 text-xs font-mono">
+          <div class="text-[10px] text-[#888886] font-bold uppercase tracking-wider">Motherboard / BIOS</div>
+          <div id="mb-model-text" class="font-bold text-[#0A0A0A] truncate">—</div>
         </div>
 
-        <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-1 text-xs font-mono">
-          <div class="text-[10px] text-slate-400 font-sans uppercase tracking-wider">Operating System</div>
-          <div id="os-caption-text" class="font-bold text-slate-200 truncate">—</div>
-          <div class="text-[10px] text-slate-500 font-sans">64-bit Kernel Platform</div>
+        <div class="p-3.5 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-1 text-xs font-mono">
+          <div class="text-[10px] text-[#888886] font-bold uppercase tracking-wider">Operating System</div>
+          <div id="os-caption-text" class="font-bold text-[#0A0A0A] truncate">—</div>
         </div>
 
-        <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-1 text-xs font-mono">
-          <div class="text-[10px] text-slate-400 font-sans uppercase tracking-wider">System Uptime</div>
-          <div id="sys-uptime-text" class="font-bold text-emerald-300 truncate">—</div>
-          <div class="text-[10px] text-slate-500 font-sans">Duration Active Without Reboot</div>
+        <div class="p-3.5 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-1 text-xs font-mono">
+          <div class="text-[10px] text-[#888886] font-bold uppercase tracking-wider">Uptime</div>
+          <div id="sys-uptime-text" class="font-bold text-[#16A34A] truncate">—</div>
         </div>
       </div>
 
       <!-- Quick Executive Pulse Metrics Bar -->
-      <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+      <div class="pt-2 border-t border-[#E5E5E3] flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-[11px] text-slate-400 font-sans font-semibold">⚡ Quick Pulse:</span>
-          <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-cyan-300">
-            <span class="text-slate-400">CPU:</span>
+          <span class="text-[11px] text-[#888886] font-bold uppercase">Quick Pulse:</span>
+          <div class="flex items-center space-x-1 px-2.5 py-0.5 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] text-[#0A0A0A]">
+            <span class="text-[#888886]">CPU:</span>
             <span id="pulse-cpu-val" class="font-bold">—%</span>
           </div>
-          <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-emerald-300">
-            <span class="text-slate-400">RAM:</span>
+          <div class="flex items-center space-x-1 px-2.5 py-0.5 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] text-[#0A0A0A]">
+            <span class="text-[#888886]">RAM:</span>
             <span id="pulse-ram-val" class="font-bold">—%</span>
           </div>
-          <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-purple-300">
-            <span class="text-slate-400">Disk I/O:</span>
+          <div class="flex items-center space-x-1 px-2.5 py-0.5 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] text-[#0A0A0A]">
+            <span class="text-[#888886]">Disk:</span>
             <span id="pulse-disk-val" class="font-bold">— MB/s</span>
           </div>
-          <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-amber-300">
-            <span class="text-slate-400">Net:</span>
+          <div class="flex items-center space-x-1 px-2.5 py-0.5 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] text-[#0A0A0A]">
+            <span class="text-[#888886]">Net:</span>
             <span id="pulse-net-val" class="font-bold">— KB/s</span>
           </div>
         </div>
-        <div class="flex items-center space-x-2 text-[11px] text-slate-400">
-          <span>Continuous Polling: <span class="text-cyan-400 font-bold font-mono">2.0s</span></span>
+        <div class="text-[11px] text-[#888886]">
+          Polling Cycle: <span class="text-[#0A0A0A] font-bold font-mono">2.0s</span>
         </div>
       </div>
     </section>
 
-    <!-- SECTION 1: ⚡ CPU -->
-    <section class="glass-card rounded-2xl p-5 border border-cyan-500/25 bg-slate-900/60 space-y-4 shadow-xl">
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+    <!-- SECTION 1: CPU -->
+    <section id="section-cpu" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
         <div class="flex items-center space-x-3">
-          <div class="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-xl text-cyan-400">⚡</div>
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+            </svg>
+          </div>
           <div>
-            <h2 class="text-base font-bold text-white flex items-center gap-2">
-              <span>CPU</span>
-            </h2>
-            <div class="text-xs font-mono text-cyan-300 font-semibold truncate max-w-lg" id="cpu-model">—</div>
+            <h2 class="text-sm font-bold text-[#0A0A0A]">CPU</h2>
+            <div class="text-xs font-mono text-[#4A4A48] truncate max-w-lg" id="cpu-model">—</div>
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <span id="cpu-topology" class="px-3 py-1 rounded-xl text-xs font-mono bg-slate-800/90 border border-slate-700 text-indigo-300 font-bold">—</span>
-          <span id="cpu-status-badge" class="px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">OPTIMAL</span>
+          <span id="cpu-topology" class="badge badge-neutral font-mono text-xs font-bold">—</span>
+          <span id="cpu-status-badge" class="badge badge-success font-mono font-bold">OPTIMAL</span>
         </div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <!-- CPU Thermals Gauge -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-3">
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Package Temperature</span>
-            <span id="cpu-throttle" class="font-mono text-[11px] text-emerald-400 font-bold">—</span>
+            <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider">Package Temp</span>
+            <span id="cpu-throttle" class="font-mono text-[11px] text-[#16A34A] font-bold">—</span>
           </div>
           <div class="my-2 flex items-center justify-center relative">
-            <svg class="w-32 h-32 transform -rotate-90" viewBox="0 0 120 120">
-              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" class="text-slate-800 fill-none" />
-              <circle id="cpu-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" stroke-dasharray="314.15" stroke-dashoffset="157" stroke-linecap="round" class="text-cyan-400 fill-none transition-all duration-700" />
+            <svg class="w-28 h-28 transform -rotate-90" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="8" class="text-[#E5E5E3] fill-none" />
+              <circle id="cpu-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="8" stroke-dasharray="314.15" stroke-dashoffset="157" stroke-linecap="round" class="text-[#0A0A0A] fill-none transition-all duration-700" />
             </svg>
             <div class="absolute flex flex-col items-center justify-center">
-              <span id="cpu-temp-val" class="text-3xl font-black text-white font-mono">—</span>
-              <span class="text-xs font-medium text-slate-400">°C</span>
+              <span id="cpu-temp-val" class="text-2xl font-bold text-[#0A0A0A] font-mono">—</span>
+              <span class="text-[10px] text-[#888886]">°C</span>
             </div>
           </div>
-          <div class="flex justify-between items-center text-[11px] font-mono text-slate-400 border-t border-slate-800/80 pt-2">
+          <div class="flex justify-between items-center text-[11px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-2">
             <span>TjMax / Core Limit:</span>
-            <span id="cpu-tjmax" class="text-slate-200 font-bold">—</span>
+            <span id="cpu-tjmax" class="text-[#0A0A0A] font-bold">—</span>
           </div>
         </div>
 
         <!-- CPU Real-Time Utilization Graph & Power -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-3">
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">CPU Load & Utilization</span>
-            <span id="trend-cpu-badge" class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">—</span>
+            <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider">CPU Load</span>
+            <span id="trend-cpu-badge" class="badge badge-neutral font-mono text-xs font-bold">—</span>
           </div>
           <div class="relative w-full h-24">
             <canvas id="chart-cpu" class="w-full h-full"></canvas>
           </div>
-          <div class="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400 border-t border-slate-800/80 pt-2">
-            <div class="flex justify-between">
-              <span>VCore:</span>
-              <span id="vcore-val" class="text-cyan-300 font-bold">— V</span>
+          <div class="grid grid-cols-3 gap-2 text-[11px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-2">
+            <div>
+              <div class="text-[9px] uppercase tracking-wider">VCore:</div>
+              <div id="vcore-val" class="text-[#0A0A0A] font-bold text-xs mt-0.5">— V</div>
             </div>
-            <div class="flex justify-between">
-              <span>Avg Load:</span>
-              <span id="stat-cpu-avg" class="text-slate-200 font-bold">—</span>
+            <div>
+              <div class="text-[9px] uppercase tracking-wider">Daya Paket:</div>
+              <div id="cpu-package-power-val" class="text-[#0A0A0A] font-bold text-xs mt-0.5">— W</div>
+            </div>
+            <div>
+              <div class="text-[9px] uppercase tracking-wider">Avg Load:</div>
+              <div id="stat-cpu-avg" class="text-[#0A0A0A] font-bold text-xs mt-0.5">—</div>
             </div>
           </div>
         </div>
 
         <!-- CPU Cooling Fan -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-3">
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-2">
-              <div class="fan-icon-spin text-cyan-400">
-                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <div class="fan-icon-spin text-[#0A0A0A]">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 2a10 10 0 1010 10A10 10 0 0012 2zm1 17.93V15a1 1 0 00-2 0v4.93A8 8 0 014.07 13H9a1 1 0 000-2H4.07A8 8 0 0111 4.07V9a1 1 0 002 0V4.07A8 8 0 0119.93 11H15a1 1 0 000 2h4.93A8 8 0 0113 19.93z"/>
                 </svg>
               </div>
-              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">CPU Cooling Fan</span>
+              <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider">Cooling Fan</span>
             </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">Active Cooler</span>
+            <span id="cpu-fan-status-badge" class="badge badge-neutral font-mono text-[10px]">Cooler</span>
           </div>
           <div class="my-auto py-2 text-center">
-            <div class="text-3xl font-black font-mono text-cyan-300"><span id="cpu-fan-rpm">—</span> <span class="text-xs text-slate-400 font-sans">RPM</span></div>
-            <div class="text-xs text-slate-400 mt-1">PWM Level: <span id="cpu-fan-pwm" class="text-cyan-400 font-bold font-mono">—</span></div>
+            <div class="text-3xl font-bold font-mono text-[#0A0A0A]"><span id="cpu-fan-rpm">—</span> <span class="text-xs text-[#888886] font-sans">RPM</span></div>
+            <div class="text-xs text-[#888886] mt-1">PWM Level: <span id="cpu-fan-pwm" class="text-[#0A0A0A] font-bold font-mono">—</span></div>
           </div>
           <div class="space-y-1">
-            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-              <div id="cpu-fan-bar" class="bg-gradient-to-r from-cyan-500 to-teal-400 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+            <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden">
+              <div id="cpu-fan-bar" class="bg-[#0A0A0A] h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
             </div>
           </div>
         </div>
       </div>
+
+      <!-- Top 5 Active Processes Consumer -->
+      <div class="pt-2 border-t border-[#E5E5E3] space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-[#0A0A0A] uppercase tracking-wider font-mono">
+            Active Processes (Top Consumers)
+          </span>
+          <span class="text-[10px] text-[#888886] font-mono">Live Feed</span>
+        </div>
+
+        <div class="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th>PID</th>
+                <th>Process Name</th>
+                <th class="text-right">CPU Time (s)</th>
+                <th class="text-right">RAM (MB)</th>
+                <th class="text-center">Impact Level</th>
+              </tr>
+            </thead>
+            <tbody id="top-processes-tbody" class="font-mono text-xs">
+              <tr>
+                <td colspan="5" class="py-4 text-center text-[#888886] font-sans text-xs">
+                  Memuat data proses aktif...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
-    <!-- SECTION 2: 🧠 RAM -->
-    <section class="glass-card rounded-2xl p-5 border border-emerald-500/25 bg-slate-900/60 space-y-4 shadow-xl">
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+    <!-- SECTION 2: RAM -->
+    <section id="section-ram" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
         <div class="flex items-center space-x-3">
-          <div class="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xl text-emerald-400">🧠</div>
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+            </svg>
+          </div>
           <div>
-            <h2 class="text-base font-bold text-white">RAM</h2>
-            <p class="text-xs text-slate-400 font-medium">Dual-Channel Physical DIMM Detection &bull; Live Memory Allocation</p>
+            <h2 class="text-sm font-bold text-[#0A0A0A]">RAM</h2>
           </div>
         </div>
-        <div class="flex items-center space-x-2 font-mono text-xs bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700">
-          <span class="text-slate-400">Total:</span>
-          <span id="ram-total-badge" class="font-bold text-cyan-300">—</span>
-          <span class="text-slate-600">|</span>
-          <span class="text-slate-400">In-Use:</span>
-          <span id="ram-used-badge" class="font-bold text-emerald-400">—</span>
+        <div class="flex items-center space-x-2 font-mono text-xs bg-[#F4F4F2] px-3 py-1 rounded-xl border border-[#E5E5E3]">
+          <span class="text-[#888886]">Total:</span>
+          <span id="ram-total-badge" class="font-bold text-[#0A0A0A]">—</span>
+          <span class="text-[#D0D0CE]">|</span>
+          <span class="text-[#888886]">In-Use:</span>
+          <span id="ram-used-badge" class="font-bold text-[#16A34A]">—</span>
         </div>
       </div>
 
       <!-- Memory Usage Bar & Sparkline -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div class="lg:col-span-2 p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-3">
+        <div class="lg:col-span-2 p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
           <div class="flex justify-between text-xs font-mono">
-            <span class="text-slate-300 font-semibold flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span>Active System RAM Allocation</span>
-            </span>
-            <span id="ram-bar-text" class="text-emerald-300 font-bold">—</span>
+            <span class="text-[#0A0A0A] font-semibold">Active Memory Allocation</span>
+            <span id="ram-bar-text" class="text-[#16A34A] font-bold">—</span>
           </div>
-          <div class="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
-            <div id="ram-usage-bar" class="bg-gradient-to-r from-emerald-500 to-cyan-500 h-3 rounded-full transition-all duration-700" style="width: 0%"></div>
+          <div class="w-full bg-[#E5E5E3] rounded-full h-2 overflow-hidden">
+            <div id="ram-usage-bar" class="bg-[#16A34A] h-2 rounded-full transition-all duration-700" style="width: 0%"></div>
           </div>
-          <div class="flex justify-between text-[11px] font-mono text-slate-400 border-t border-slate-800/80 pt-2">
-            <span>Used: <span id="stat-ram-used" class="text-emerald-300 font-bold">—</span></span>
-            <span>Total Physical: <span id="stat-ram-total" class="text-slate-200 font-bold">—</span></span>
+          <div class="flex justify-between text-[11px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-2">
+            <span>Used: <span id="stat-ram-used" class="text-[#0A0A0A] font-bold">—</span></span>
+            <span>Total: <span id="stat-ram-total" class="text-[#0A0A0A] font-bold">—</span></span>
           </div>
         </div>
 
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-2">
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-2">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">RAM Usage Trend</span>
-            <span id="trend-ram-badge" class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">—</span>
+            <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider">RAM Trend</span>
+            <span id="trend-ram-badge" class="badge badge-neutral font-mono text-xs font-bold">—</span>
           </div>
           <div class="relative w-full h-20">
             <canvas id="chart-ram" class="w-full h-full"></canvas>
@@ -344,134 +433,149 @@
       </div>
     </section>
 
-    <!-- SECTION 3: 🎮 GPU -->
-    <section class="glass-card rounded-2xl p-5 border border-purple-500/25 bg-slate-900/60 space-y-4 shadow-xl">
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+    <!-- SECTION 3: GPU -->
+    <section id="section-gpu" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
         <div class="flex items-center space-x-3">
-          <div class="p-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-xl text-purple-400">🎮</div>
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+            </svg>
+          </div>
           <div>
-            <h2 class="text-base font-bold text-white">GPU</h2>
-            <div class="text-xs font-mono text-purple-300 font-semibold truncate max-w-lg" id="gpu-model">—</div>
+            <h2 class="text-sm font-bold text-[#0A0A0A]">GPU</h2>
+            <div class="text-xs font-mono text-[#4A4A48] truncate max-w-lg" id="gpu-model">—</div>
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <span id="gpu-status-badge" class="px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">OPTIMAL</span>
+          <span id="gpu-3d-load-header" class="badge badge-neutral font-mono text-xs font-bold">3D LOAD: —%</span>
+          <span id="gpu-status-badge" class="badge badge-success font-mono font-bold">OPTIMAL</span>
         </div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <!-- GPU Thermals Gauge -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-3">
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">GPU Core Temperature</span>
-            <span id="gpu-power" class="font-mono text-[11px] text-cyan-300 font-bold">— W</span>
+            <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider">Core Temp</span>
+            <span id="gpu-power" class="font-mono text-[11px] text-[#0A0A0A] font-bold">— W</span>
           </div>
           <div class="my-2 flex items-center justify-center relative">
-            <svg class="w-32 h-32 transform -rotate-90" viewBox="0 0 120 120">
-              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" class="text-slate-800 fill-none" />
-              <circle id="gpu-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" stroke-dasharray="314.15" stroke-dashoffset="180" stroke-linecap="round" class="text-emerald-400 fill-none transition-all duration-700" />
+            <svg class="w-28 h-28 transform -rotate-90" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="8" class="text-[#E5E5E3] fill-none" />
+              <circle id="gpu-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="8" stroke-dasharray="314.15" stroke-dashoffset="180" stroke-linecap="round" class="text-[#16A34A] fill-none transition-all duration-700" />
             </svg>
             <div class="absolute flex flex-col items-center justify-center">
-              <span id="gpu-temp-val" class="text-3xl font-black text-white font-mono">—</span>
-              <span class="text-xs font-medium text-slate-400">°C</span>
+              <span id="gpu-temp-val" class="text-2xl font-bold text-[#0A0A0A] font-mono">—</span>
+              <span class="text-[10px] text-[#888886]">°C</span>
             </div>
           </div>
-          <div class="flex justify-between items-center text-[11px] font-mono text-slate-400 border-t border-slate-800/80 pt-2">
+          <div class="flex justify-between items-center text-[11px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-2">
             <span>Hotspot / VRAM:</span>
-            <span id="gpu-hotspot" class="text-slate-200 font-bold">—</span>
+            <span id="gpu-hotspot" class="text-[#0A0A0A] font-bold">—</span>
           </div>
         </div>
 
-        <!-- GPU Cooling Unit (Active Cooler for GT 710 / Fanless for iGPU) -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-3">
+        <!-- GPU Cooling Unit -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-2">
-              <div id="gpu-fan-icon" class="fan-icon-spin text-purple-400">
-                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <div id="gpu-fan-icon" class="fan-icon-spin text-[#0A0A0A]">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 2a10 10 0 1010 10A10 10 0 0012 2zm1 17.93V15a1 1 0 00-2 0v4.93A8 8 0 014.07 13H9a1 1 0 000-2H4.07A8 8 0 0111 4.07V9a1 1 0 002 0V4.07A8 8 0 0119.93 11H15a1 1 0 000 2h4.93A8 8 0 0113 19.93z"/>
                 </svg>
               </div>
-              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">GPU Cooling Unit</span>
+              <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider">Cooling Unit</span>
             </div>
-            <span id="gpu-fan-subtext" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">Cooler</span>
+            <span id="gpu-fan-subtext" class="badge badge-neutral font-mono text-[10px]">Cooler</span>
           </div>
           <div class="my-auto py-2 text-center">
-            <div class="text-3xl font-black font-mono text-purple-300"><span id="gpu-fan-rpm">—</span></div>
-            <div class="text-xs text-slate-400 mt-1">PWM Level: <span id="gpu-fan-pwm" class="text-purple-400 font-bold font-mono">—</span></div>
+            <div class="text-3xl font-bold font-mono text-[#0A0A0A]"><span id="gpu-fan-rpm">—</span></div>
+            <div class="text-xs text-[#888886] mt-1">PWM Level: <span id="gpu-fan-pwm" class="text-[#0A0A0A] font-bold font-mono">—</span></div>
           </div>
           <div class="space-y-1">
-            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-              <div id="gpu-fan-bar" class="bg-gradient-to-r from-purple-500 to-indigo-400 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+            <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden">
+              <div id="gpu-fan-bar" class="bg-[#0A0A0A] h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
             </div>
           </div>
         </div>
 
-        <!-- GPU Power & Driver Specs -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-3 text-xs font-mono">
+        <!-- GPU Power & Specs -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3 text-xs font-mono">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider font-sans">Hardware Profile</span>
-            <span class="text-purple-400 font-bold">PCIe / Integrated</span>
+            <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider font-sans">Profile</span>
+            <span class="text-[#0A0A0A] font-bold">PCIe / Integrated</span>
           </div>
-          <div class="space-y-2 py-1 text-slate-300">
-            <div class="flex justify-between border-b border-slate-800/60 pb-1.5">
-              <span class="text-slate-400">Adapter Type:</span>
-              <span class="font-bold text-slate-200" id="gpu-adapter-type">Direct WMI/SSH</span>
+          <div class="space-y-2 py-1 text-[#4A4A48]">
+            <div class="flex justify-between border-b border-[#E5E5E3] pb-1.5">
+              <span class="text-[#888886]">Adapter:</span>
+              <span class="font-bold text-[#0A0A0A]" id="gpu-adapter-type">Direct</span>
             </div>
-            <div class="flex justify-between border-b border-slate-800/60 pb-1.5">
-              <span class="text-slate-400">Dedicated VRAM:</span>
-              <span class="font-bold text-emerald-400" id="gpu-vram-text">Dynamic</span>
+            <div class="flex justify-between border-b border-[#E5E5E3] pb-1.5">
+              <span class="text-[#888886]">Total VRAM:</span>
+              <span class="font-bold text-[#16A34A]" id="gpu-vram-text">Dynamic</span>
             </div>
-            <div class="flex justify-between">
-              <span class="text-slate-400">Display Engine:</span>
-              <span class="font-bold text-cyan-300">Hardware Accelerated</span>
+            <div class="space-y-1 border-b border-[#E5E5E3] pb-1.5">
+              <div class="flex justify-between items-center text-[11px]">
+                <span class="text-[#888886]">VRAM Terpakai:</span>
+                <span id="gpu-vram-usage-text" class="font-bold text-[#0A0A0A] font-mono">—</span>
+              </div>
+              <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden">
+                <div id="gpu-vram-bar" class="bg-[#16A34A] h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+              </div>
             </div>
-          </div>
-          <div class="text-[10px] text-slate-500 italic border-t border-slate-800/80 pt-1.5 font-sans">
-            * Dikonfigurasi secara otomatis sesuai arsitektur kartu grafis.
+            <div class="flex justify-between items-center">
+              <span class="text-[#888886]">3D Load:</span>
+              <span class="font-bold text-[#0A0A0A] font-mono" id="gpu-3d-load-text">—%</span>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- SECTION 4: 💽 STORAGE -->
-    <section class="glass-card rounded-2xl p-5 border border-indigo-500/25 bg-slate-900/60 space-y-4 shadow-xl">
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+    <!-- SECTION 4: STORAGE -->
+    <section id="section-storage" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
         <div class="flex items-center space-x-3">
-          <div class="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-xl text-indigo-400">💽</div>
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path>
+            </svg>
+          </div>
           <div>
-            <h2 class="text-base font-bold text-white">STORAGE</h2>
-            <p class="text-xs text-slate-400 font-medium">Physical Drives Identification &bull; SMART Health &bull; Volume Partitions</p>
+            <h2 class="text-sm font-bold text-[#0A0A0A]">Storage</h2>
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <span id="nvme-status-badge" class="px-2.5 py-1 rounded-xl text-xs font-bold font-mono border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">HEALTHY</span>
+          <span id="nvme-status-badge" class="badge badge-success font-mono font-bold">HEALTHY</span>
         </div>
       </div>
 
-      <!-- Storage Metrics Row (SMART + Sparkline) -->
+      <!-- Storage Metrics Row -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex items-center justify-between">
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex items-center justify-between">
           <div>
-            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Primary Controller Temp</div>
-            <div class="text-2xl font-black font-mono text-teal-300 mt-1"><span id="nvme-temp-val">—</span> °C</div>
-            <div class="text-[11px] font-mono text-emerald-400 font-bold mt-0.5">SMART: <span id="nvme-health">100% Good</span></div>
+            <div class="text-[11px] font-bold text-[#888886] uppercase tracking-wider">Primary Temp</div>
+            <div class="text-2xl font-bold font-mono text-[#0A0A0A] mt-1"><span id="nvme-temp-val">—</span> °C</div>
+            <div class="text-[11px] font-mono text-[#16A34A] font-bold mt-0.5">SMART: <span id="nvme-health">100% Good</span></div>
           </div>
           <div class="w-16 h-16 relative flex items-center justify-center">
             <svg class="w-16 h-16 transform -rotate-90" viewBox="0 0 120 120">
-              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" class="text-slate-800 fill-none" />
-              <circle id="nvme-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="10" stroke-dasharray="314.15" stroke-dashoffset="200" stroke-linecap="round" class="text-teal-400 fill-none transition-all duration-700" />
+              <circle cx="60" cy="60" r="50" stroke="currentColor" stroke-width="8" class="text-[#E5E5E3] fill-none" />
+              <circle id="nvme-temp-circle" cx="60" cy="60" r="50" stroke="currentColor" stroke-width="8" stroke-dasharray="314.15" stroke-dashoffset="200" stroke-linecap="round" class="text-[#0A0A0A] fill-none transition-all duration-700" />
             </svg>
-            <span class="absolute text-sm">💾</span>
+            <span class="absolute text-sm">
+              <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
+              </svg>
+            </span>
           </div>
         </div>
 
-        <div class="lg:col-span-2 p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-2">
+        <div class="lg:col-span-2 p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-2">
           <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-2">
-              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider font-sans">Disk I/O Activity</span>
-              <span id="stat-disk-rate" class="font-mono text-xs font-bold text-purple-300">—</span>
-            </div>
-            <span id="trend-disk-badge" class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">—</span>
+            <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider font-sans">Disk Activity</span>
+            <span id="trend-disk-badge" class="badge badge-neutral font-mono text-xs font-bold">—</span>
           </div>
           <div class="relative w-full h-16">
             <canvas id="chart-disk" class="w-full h-full"></canvas>
@@ -485,160 +589,163 @@
       </div>
     </section>
 
-    <!-- SECTION 5: 🖲️ POWER & NETWORK -->
-    <section class="glass-card rounded-2xl p-5 border border-cyan-500/25 bg-slate-900/60 space-y-4 shadow-xl">
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+    <!-- SECTION 5: POWER & NETWORK -->
+    <section id="section-power" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
         <div class="flex items-center space-x-3">
-          <div class="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-xl text-cyan-400">🖲️</div>
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+            </svg>
+          </div>
           <div>
-            <h2 class="text-base font-bold text-white">POWER & NETWORK</h2>
-            <p class="text-xs text-slate-400 font-medium">ATX Power Rails &bull; Motherboard VRM &bull; Network Traffic &bull; Chassis Fan</p>
+            <h2 class="text-sm font-bold text-[#0A0A0A]">Power & Network</h2>
           </div>
         </div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        
-        <!-- ATX Power Delivery Rails -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 space-y-2.5 text-xs font-mono">
-          <div class="text-xs font-bold text-slate-300 uppercase tracking-wider font-sans border-b border-slate-800/80 pb-1.5 flex items-center justify-between">
-            <span>Power Delivery Rails</span>
-            <span id="v12-badge" class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">STABLE</span>
+        <!-- Power Rails -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] space-y-2 text-xs font-mono">
+          <div class="text-xs font-bold text-[#0A0A0A] uppercase tracking-wider font-sans border-b border-[#E5E5E3] pb-1.5 flex items-center justify-between">
+            <span>Power Delivery</span>
+            <span id="v12-badge" class="badge badge-success text-[10px]">STABLE</span>
           </div>
           <div class="flex justify-between items-center">
-            <span class="text-slate-400">+12V Main Rail:</span>
-            <span id="v12-val" class="font-black text-emerald-400 text-sm">— V</span>
+            <span class="text-[#888886]">+12V Rail:</span>
+            <span id="v12-val" class="font-bold text-[#0A0A0A] text-sm">— V</span>
           </div>
           <div class="flex justify-between items-center">
-            <span class="text-slate-400">+5.0V Logic Rail:</span>
-            <span id="v5-val" class="font-bold text-emerald-400">— V</span>
+            <span class="text-[#888886]">+5.0V Rail:</span>
+            <span id="v5-val" class="font-bold text-[#0A0A0A]">— V</span>
           </div>
           <div class="flex justify-between items-center">
-            <span class="text-slate-400">+3.3V Board Rail:</span>
-            <span id="v33-val" class="font-bold text-emerald-400">— V</span>
+            <span class="text-[#888886]">+3.3V Rail:</span>
+            <span id="v33-val" class="font-bold text-[#0A0A0A]">— V</span>
           </div>
-          <div class="flex justify-between items-center border-t border-slate-800/80 pt-1.5">
-            <span class="text-slate-400 font-sans">Total Power Draw:</span>
-            <span id="total-power-val" class="font-black text-cyan-300 text-sm">— W</span>
+          <div class="flex justify-between items-center border-t border-[#E5E5E3] pt-1.5">
+            <span class="text-[#888886] font-sans">Total Power:</span>
+            <span id="total-power-val" class="font-bold text-[#0A0A0A] text-sm">— W</span>
           </div>
         </div>
 
-        <!-- Motherboard VRM & Ambient Thermals -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 space-y-2.5 text-xs font-mono">
-          <div class="text-xs font-bold text-slate-300 uppercase tracking-wider font-sans border-b border-slate-800/80 pb-1.5 flex items-center justify-between">
-            <span>Motherboard Thermals</span>
-            <span class="text-teal-400">🌡️</span>
+        <!-- Motherboard Thermals -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] space-y-2 text-xs font-mono">
+          <div class="text-xs font-bold text-[#0A0A0A] uppercase tracking-wider font-sans border-b border-[#E5E5E3] pb-1.5 flex items-center justify-between">
+            <span>Board Thermals</span>
+            <span>
+              <svg class="w-3.5 h-3.5 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 9v6m-4-6v6m8-6v6M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"></path>
+              </svg>
+            </span>
           </div>
           <div class="flex justify-between items-center">
-            <span class="text-slate-400">Main Board Sensor:</span>
-            <span id="mb-temp-val" class="font-black text-teal-300 text-sm">—</span>
+            <span class="text-[#888886]">Main Board:</span>
+            <span id="mb-temp-val" class="font-bold text-[#0A0A0A] text-sm">—</span>
           </div>
           <div class="flex justify-between items-center">
-            <span class="text-slate-400">VRM Power MOSFETs:</span>
-            <span id="vrm-temp" class="font-bold text-teal-300">—</span>
+            <span class="text-[#888886]">VRM MOSFETs:</span>
+            <span id="vrm-temp" class="font-bold text-[#0A0A0A]">—</span>
           </div>
           <div class="flex justify-between items-center">
-            <span class="text-slate-400">Chassis Ambient:</span>
-            <span id="ambient-temp" class="font-bold text-teal-300">—</span>
-          </div>
-          <div class="text-[10px] text-slate-500 font-sans border-t border-slate-800/80 pt-1.5">
-            Thermal Zones Optimal
+            <span class="text-[#888886]">Chassis Ambient:</span>
+            <span id="ambient-temp" class="font-bold text-[#0A0A0A]">—</span>
           </div>
         </div>
 
-        <!-- Network Traffic Sparkline -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-2">
+        <!-- Network Traffic -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-2">
           <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-1.5">
-              <span class="text-amber-400 text-sm">🌐</span>
-              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider font-sans">Network Traffic</span>
-            </div>
-            <span id="trend-net-badge" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">—</span>
+            <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider font-sans">Network Traffic</span>
+            <span id="trend-net-badge" class="badge badge-neutral font-mono text-[10px]">—</span>
           </div>
           <div class="relative w-full h-16">
             <canvas id="chart-network" class="w-full h-full"></canvas>
           </div>
-          <div class="flex justify-between items-center text-[10px] font-mono text-slate-400 border-t border-slate-800/80 pt-1.5">
-            <span>↓ In: <span id="stat-net-rx" class="text-cyan-300 font-bold">—</span></span>
-            <span>↑ Out: <span id="stat-net-tx" class="text-amber-300 font-bold">—</span></span>
+          <div class="flex justify-between items-center text-[10px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-1">
+            <span>↓ In: <span id="stat-net-rx" class="text-[#0A0A0A] font-bold">—</span></span>
+            <span>↑ Out: <span id="stat-net-tx" class="text-[#0A0A0A] font-bold">—</span></span>
           </div>
         </div>
 
-        <!-- Chassis System Fan Status -->
-        <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between space-y-2">
+        <!-- Chassis Fan -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-2">
           <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-2">
-              <span class="text-indigo-400 text-sm">💨</span>
-              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider font-sans">Chassis Case Fan</span>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700">Status</span>
+            <span class="text-[11px] font-bold text-[#888886] uppercase tracking-wider font-sans">Chassis Fan</span>
+            <span class="badge badge-neutral font-mono text-[10px]">Status</span>
           </div>
           <div class="my-auto py-1 text-center">
-            <div class="text-xl font-bold font-mono text-slate-400"><span id="case-fan-rpm">N/A</span></div>
-            <div class="text-[11px] text-slate-500 font-sans mt-0.5">Tidak Terpasang / Sensor N/A</div>
+            <div class="text-xl font-bold font-mono text-[#888886]"><span id="case-fan-rpm">N/A</span></div>
+            <div class="text-[11px] text-[#888886] font-sans mt-0.5">Tidak Terpasang</div>
           </div>
           <div class="space-y-1">
-            <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-              <div id="case-fan-bar" class="bg-indigo-500 h-1.5 rounded-full" style="width: 0%"></div>
+            <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden">
+              <div id="case-fan-bar" class="bg-[#0A0A0A] h-1.5 rounded-full" style="width: 0%"></div>
             </div>
           </div>
         </div>
-
       </div>
     </section>
 
-    <!-- SECTION 6: 📋 OS EVENTS & LOGS -->
-    <section class="glass-card rounded-2xl p-5 border border-cyan-500/25 bg-slate-900/60 space-y-4 shadow-xl">
-      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+    <!-- SECTION 6: OS EVENTS & ANOMALY CENTER -->
+    <section class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b border-[#E5E5E3] pb-3">
         <!-- Tab Switcher Buttons -->
-        <div class="flex items-center space-x-2 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
-          <button id="tab-btn-events" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow flex items-center gap-2 transition">
-            <span>📋 1. OS EVENTS & LOGS</span>
-            <span id="badge-events-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-cyan-500/30 text-cyan-200">0</span>
+        <div class="flex items-center space-x-2">
+          <button id="tab-btn-events" class="filter-pill active">
+            <span>Event Stream</span>
+            <span id="badge-events-count" class="pill-count">0</span>
           </button>
-          <button id="tab-btn-alerts" class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center gap-2 transition">
-            <span>🚨 2. Hardware Safety & Anomaly Center</span>
-            <span id="badge-alerts-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300">0</span>
+          <button id="tab-btn-alerts" class="filter-pill">
+            <span>Safety Alerts</span>
+            <span id="badge-alerts-count" class="pill-count">0</span>
           </button>
         </div>
 
         <!-- Filter Controls for Active Tab -->
-        <div id="filter-bar-events" class="flex flex-wrap items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
-          <button data-evfilter="ALL" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">ALL (<span id="count-ev-all">0</span>)</button>
-          <button data-evfilter="Application" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-purple-300 hover:bg-purple-500/10">Application (<span id="count-ev-app">0</span>)</button>
-          <button data-evfilter="System" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-indigo-300 hover:bg-indigo-500/10">System (<span id="count-ev-system">0</span>)</button>
-          <button data-evfilter="WARNING_ERROR" class="evfilter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-400 hover:bg-amber-500/10">Warning/Error (<span id="count-ev-warn">0</span>)</button>
-          <button id="copy-all-events-btn" class="px-2.5 py-1 rounded-lg text-xs font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 transition flex items-center gap-1" title="Salin semua event logs Windows ke clipboard">📋 Copy All</button>
+        <div id="filter-bar-events" class="flex flex-wrap items-center gap-1.5">
+          <button data-evfilter="ALL" class="evfilter-btn filter-pill active">ALL (<span id="count-ev-all">0</span>)</button>
+          <button data-evfilter="Application" class="evfilter-btn filter-pill">Application (<span id="count-ev-app">0</span>)</button>
+          <button data-evfilter="System" class="evfilter-btn filter-pill">System (<span id="count-ev-system">0</span>)</button>
+          <button data-evfilter="Security" class="evfilter-btn filter-pill">Security (<span id="count-ev-sec">0</span>)</button>
+          <button data-evfilter="WARNING_ERROR" class="evfilter-btn filter-pill">Warning/Error (<span id="count-ev-warn">0</span>)</button>
+          <button id="copy-all-events-btn" class="btn btn-ghost btn-sm flex items-center gap-1" title="Salin semua event logs">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            <span>Copy All</span>
+          </button>
         </div>
 
-        <div id="filter-bar-alerts" class="hidden flex flex-wrap items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
-          <button data-filter="ALL" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">ALL (<span id="count-all">0</span>)</button>
-          <button data-filter="CRITICAL" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10">CRITICAL (<span id="count-critical">0</span>)</button>
-          <button data-filter="WARNING" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-400 hover:bg-amber-500/10">WARNING (<span id="count-warning">0</span>)</button>
-          <button data-filter="INFO" class="filter-btn px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:bg-slate-700/20">INFO (<span id="count-info">0</span>)</button>
-          <button id="copy-all-alerts-btn" class="px-2.5 py-1 rounded-lg text-xs font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 transition flex items-center gap-1" title="Salin semua riwayat anomali hardware ke clipboard">📋 Copy All</button>
-          <button id="clear-logs-btn" class="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-300">Clear</button>
+        <div id="filter-bar-alerts" class="hidden flex flex-wrap items-center gap-1.5">
+          <button data-filter="ALL" class="filter-btn filter-pill active">ALL (<span id="count-all">0</span>)</button>
+          <button data-filter="CRITICAL" class="filter-btn filter-pill">CRITICAL (<span id="count-critical">0</span>)</button>
+          <button data-filter="WARNING" class="filter-btn filter-pill">WARNING (<span id="count-warning">0</span>)</button>
+          <button data-filter="INFO" class="filter-btn filter-pill">INFO (<span id="count-info">0</span>)</button>
+          <button id="copy-all-alerts-btn" class="btn btn-ghost btn-sm flex items-center gap-1" title="Salin riwayat anomali">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            <span>Copy All</span>
+          </button>
+          <button id="clear-logs-btn" class="btn btn-ghost btn-sm">Clear</button>
         </div>
       </div>
 
-      <!-- TAB 1 CONTENT (DEFAULT VISIBLE): WINDOWS OS EVENT & APPLICATION ACTIVITY LOGS -->
-      <div id="tab-content-events" class="overflow-x-auto rounded-xl border border-slate-800/80 max-h-96 overflow-y-auto">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-slate-900/90 text-slate-400 sticky top-0 uppercase tracking-wider text-[11px] border-b border-slate-800">
+      <!-- TAB 1 CONTENT: WINDOWS OS EVENT & APPLICATION LOGS -->
+      <div id="tab-content-events" class="table-card max-h-96 overflow-y-auto">
+        <table>
+          <thead class="sticky top-0 z-10">
             <tr>
-              <th class="py-2.5 px-4">Waktu</th>
-              <th class="py-2.5 px-3">Severity</th>
-              <th class="py-2.5 px-3">Channel / Log</th>
-              <th class="py-2.5 px-3">Event ID</th>
-              <th class="py-2.5 px-4">Provider / Sumber</th>
-              <th class="py-2.5 px-4">Deskripsi Kejadian (Message)</th>
-              <th class="py-2.5 px-3 text-right">Aksi</th>
+              <th>Waktu</th>
+              <th>Severity</th>
+              <th>Channel</th>
+              <th>Event ID</th>
+              <th>Provider</th>
+              <th>Message</th>
+              <th class="text-right">Aksi</th>
             </tr>
           </thead>
-          <tbody id="events-table-body" class="divide-y divide-slate-800/60 font-mono">
+          <tbody id="events-table-body" class="font-mono text-xs">
             <tr>
-              <td colspan="7" class="py-8 text-center text-slate-500 font-sans">
-                Memuat stream Windows Event Log dari target...
+              <td colspan="7" class="py-8 text-center text-[#888886] font-sans">
+                Memuat stream Windows Event Log...
               </td>
             </tr>
           </tbody>
@@ -646,21 +753,21 @@
       </div>
 
       <!-- TAB 2 CONTENT: HARDWARE ANOMALY ALERTS TABLE -->
-      <div id="tab-content-alerts" class="hidden overflow-x-auto rounded-xl border border-slate-800/80 max-h-96 overflow-y-auto">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-slate-900/90 text-slate-400 sticky top-0 uppercase tracking-wider text-[11px] border-b border-slate-800">
+      <div id="tab-content-alerts" class="hidden table-card max-h-96 overflow-y-auto">
+        <table>
+          <thead class="sticky top-0 z-10">
             <tr>
-              <th class="py-2.5 px-4">Waktu (Timestamp)</th>
-              <th class="py-2.5 px-3">Tingkat (Severity)</th>
-              <th class="py-2.5 px-3">Komponen / Sensor</th>
-              <th class="py-2.5 px-4">Deskripsi Anomali & Nilai Sensor</th>
-              <th class="py-2.5 px-3">Tindakan Rekomendasi</th>
-              <th class="py-2.5 px-3 text-right">Aksi</th>
+              <th>Waktu</th>
+              <th>Severity</th>
+              <th>Sensor</th>
+              <th>Deskripsi Anomali</th>
+              <th>Rekomendasi</th>
+              <th class="text-right">Aksi</th>
             </tr>
           </thead>
-          <tbody id="alerts-table-body" class="divide-y divide-slate-800/60 font-mono">
+          <tbody id="alerts-table-body" class="font-mono text-xs">
             <tr>
-              <td colspan="6" class="py-8 text-center text-slate-500 font-sans">
+              <td colspan="6" class="py-8 text-center text-[#888886] font-sans">
                 Tidak ada anomali hardware yang terdeteksi.
               </td>
             </tr>
@@ -669,59 +776,54 @@
       </div>
     </section>
 
-    <!-- Footer -->
-    <footer class="text-center text-xs text-slate-500 pt-4 pb-8 space-y-1">
-      <p>Enterprise Hardware Sensor Telemetry & Remote SSH NOC Gateway</p>
-      <p class="text-[11px] text-slate-600">Terintegrasi dengan OpenSSH Remote Query &bull; Windows WMI & Event Logs &bull; Component-Centric Architecture &bull; Strict Credential Vault</p>
-    </footer>
-
   </div>
 
-  <!-- MODAL: ADD / EDIT DEVICE PROFILE (STRICT PASSWORD VAULT) -->
-  <div id="device-profile-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-    <div class="glass-card rounded-2xl border border-cyan-500/40 p-6 max-w-lg w-full shadow-2xl space-y-4 animate-modal">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div class="flex items-center space-x-2 text-cyan-400">
-          <span class="text-lg">🛡️</span>
-          <h3 id="modal-profile-title" class="text-base font-bold text-white">Profil Perangkat & Credential Vault</h3>
+  <!-- MODAL: ADD / EDIT DEVICE PROFILE (DSS-V1 FORM STYLING) -->
+  <div id="device-profile-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+    <div class="card p-6 max-w-lg w-full shadow-lg space-y-4 animate-modal bg-white border border-[#E5E5E3]">
+      <div class="flex items-center justify-between border-b border-[#E5E5E3] pb-3">
+        <div class="flex items-center space-x-2">
+          <svg class="w-4 h-4 text-[#0A0A0A] dark:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+          <h3 id="modal-profile-title" class="text-sm font-bold text-[#0A0A0A]">Profil Perangkat & Credential Vault</h3>
         </div>
-        <button id="close-profile-modal-btn" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+        <button id="close-profile-modal-btn" class="text-[#888886] hover:text-[#0A0A0A] text-xl leading-none">&times;</button>
       </div>
 
       <form id="device-profile-form" class="space-y-3.5 text-xs">
         <input type="hidden" id="modal-node-id" value="">
 
         <div>
-          <label class="block text-slate-300 font-semibold mb-1">Nama Alias Perangkat:</label>
-          <input type="text" id="modal-node-name" placeholder="contoh: Laptop Acer Nitro i5 / Server Backup" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-sans focus:border-cyan-400 focus:outline-none" required>
+          <label class="form-label">Nama Alias Perangkat:</label>
+          <input type="text" id="modal-node-name" placeholder="contoh: Laptop Acer Nitro / Server Database" class="form-input" required>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block text-slate-300 font-semibold mb-1">Alamat IP / Host Target:</label>
-            <input type="text" id="modal-node-host" placeholder="172.16.4.205" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-cyan-400 focus:outline-none" required>
+            <label class="form-label">Alamat IP / Host Target:</label>
+            <input type="text" id="modal-node-host" placeholder="172.16.4.205" class="form-input font-mono" required>
           </div>
           <div>
-            <label class="block text-slate-300 font-semibold mb-1">Port SSH:</label>
-            <input type="number" id="modal-node-port" placeholder="22" value="22" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-cyan-400 focus:outline-none" required>
+            <label class="form-label">Port SSH:</label>
+            <input type="number" id="modal-node-port" placeholder="22" value="22" class="form-input font-mono" required>
+            <button type="button" id="btn-profile-view-setup" class="text-[11px] text-[#4A4A48] hover:text-[#0A0A0A] underline flex items-center gap-1.5 mt-1 transition">
+              <svg class="w-3 h-3 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+              </svg>
+              <span>Script Setup SSH untuk Port Ini</span>
+            </button>
           </div>
         </div>
 
         <div>
-          <label class="block text-slate-300 font-semibold mb-1">Username SSH Windows/Linux:</label>
-          <input type="text" id="modal-node-user" placeholder="laptop-69pj06ep\acer" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-cyan-400 focus:outline-none" required>
+          <label class="form-label">Username SSH Windows/Linux:</label>
+          <input type="text" id="modal-node-user" placeholder="laptop-69pj06ep\acer" class="form-input font-mono" required>
         </div>
 
-        <!-- STRICT PASSWORD VAULT FIELD: NO VIEWING, NO COPYING, FULL DOTS ONLY -->
-        <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+        <!-- STRICT PASSWORD VAULT FIELD -->
+        <div class="p-3 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] space-y-1.5">
           <div class="flex items-center justify-between">
-            <label class="block text-slate-200 font-semibold flex items-center gap-1.5">
-              <span>Password SSH:</span>
-              <span id="modal-pwd-status" class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-normal">Tersimpan</span>
-            </label>
-            <span class="text-[10px] text-amber-400 font-mono flex items-center gap-1">
-              <span>🔒 Strict Vault Protected</span>
-            </span>
+            <label class="form-label mb-0">Password SSH:</label>
+            <span id="modal-pwd-status" class="badge badge-success text-[10px]">Tersimpan</span>
           </div>
           
           <input 
@@ -729,34 +831,34 @@
             id="modal-node-password" 
             autocomplete="new-password"
             placeholder="•••••••• (Tersimpan di Vault - isi jika ingin ganti)" 
-            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono tracking-widest focus:border-cyan-400 focus:outline-none select-none">
-          <p class="text-[10px] text-slate-500 italic">
-            * Password disimpan secara terisolasi di sisi server (Vault) dan tidak dapat dilihat maupun disalin dari antarmuka Web.
+            class="form-input font-mono tracking-widest select-none">
+          <p class="text-[10px] text-[#888886] italic">
+            * Password disimpan secara terenkripsi di server (Vault) dan tidak dapat dilihat dari antarmuka Web.
           </p>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-slate-300 font-semibold mb-1">Interval Polling (Detik):</label>
-            <input type="number" step="0.5" id="modal-node-interval" placeholder="2.0" value="2.0" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-cyan-400 focus:outline-none" required>
+            <label class="form-label">Interval Polling (Detik):</label>
+            <input type="number" step="0.5" id="modal-node-interval" placeholder="2.0" value="2.0" class="form-input font-mono" required>
           </div>
           <div class="flex items-end pb-1">
-            <label class="flex items-center space-x-2 cursor-pointer text-slate-300 font-semibold">
-              <input type="checkbox" id="modal-node-enabled" checked class="w-4 h-4 rounded text-cyan-500 bg-slate-900 border-slate-700 focus:ring-0">
-              <span>Aktifkan Monitoring Node</span>
+            <label class="flex items-center space-x-2 cursor-pointer text-[#4A4A48] font-semibold text-xs">
+              <input type="checkbox" id="modal-node-enabled" checked class="w-4 h-4 rounded text-[#0A0A0A] border-[#E5E5E3] focus:ring-0">
+              <span>Aktifkan Monitoring</span>
             </label>
           </div>
         </div>
 
         <div id="modal-profile-feedback" class="hidden text-center text-xs font-semibold py-1.5 rounded"></div>
 
-        <div class="flex items-center justify-between pt-2 border-t border-slate-800">
-          <button type="button" id="delete-profile-btn" class="hidden px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-bold transition">
+        <div class="flex items-center justify-between pt-2 border-t border-[#E5E5E3]">
+          <button type="button" id="delete-profile-btn" class="hidden btn btn-danger-ghost btn-sm">
             Hapus Perangkat
           </button>
           <div class="flex items-center space-x-2 ml-auto">
-            <button type="button" id="cancel-profile-modal-btn" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition">Batal</button>
-            <button type="submit" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-slate-950 font-extrabold shadow-lg shadow-cyan-500/20 transition">Simpan Profil</button>
+            <button type="button" id="cancel-profile-modal-btn" class="btn btn-ghost btn-sm">Batal</button>
+            <button type="submit" class="btn btn-black btn-sm">Simpan Profil</button>
           </div>
         </div>
       </form>
@@ -764,92 +866,69 @@
   </div>
 
   <!-- MODAL: SSH CONNECTION ERROR & TROUBLESHOOTING POPUP -->
-  <div id="ssh-troubleshoot-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-    <div class="glass-card rounded-2xl border border-rose-500/50 p-6 max-w-2xl w-full shadow-2xl space-y-4 animate-modal max-h-[90vh] overflow-y-auto">
-      
-      <!-- Modal Header -->
-      <div class="flex items-start justify-between border-b border-rose-500/30 pb-3">
-        <div class="flex items-center space-x-3 text-rose-400">
-          <div class="p-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-xl animate-pulse">
-            🔴
+  <div id="ssh-troubleshoot-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+    <div class="card p-6 max-w-2xl w-full shadow-lg space-y-4 animate-modal max-h-[90vh] overflow-y-auto bg-white border border-[#E5E5E3]">
+      <div class="flex items-start justify-between border-b border-[#E5E5E3] pb-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-[#FEF2F2] border border-[#FECACA] flex items-center justify-center">
+            <svg class="w-4 h-4 text-[#DC2626]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" stroke-width="2" fill="currentColor"></circle></svg>
           </div>
           <div>
-            <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <h3 class="text-sm font-bold text-[#0A0A0A] flex items-center gap-2">
               <span>Kendala Koneksi SSH Target</span>
-              <span id="troubleshoot-node-badge" class="text-xs px-2 py-0.5 rounded font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">TIMEOUT</span>
+              <span id="troubleshoot-node-badge" class="badge badge-danger text-xs font-bold font-mono">TIMEOUT</span>
             </h3>
-            <p id="troubleshoot-node-info" class="text-xs text-slate-400 font-mono">Target: 192.168.27.203:22 (User: it-ihb\windows)</p>
+            <p id="troubleshoot-node-info" class="text-xs text-[#888886] font-mono">Target: 192.168.27.203:22</p>
           </div>
         </div>
-        <button id="close-troubleshoot-modal-btn" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+        <button id="close-troubleshoot-modal-btn" class="text-[#888886] hover:text-[#0A0A0A] text-2xl leading-none">&times;</button>
       </div>
 
       <!-- Diagnostic Summary Box -->
-      <div class="p-3.5 rounded-xl bg-slate-950/80 border border-rose-500/30 space-y-2">
+      <div class="p-3.5 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] space-y-2">
         <div class="flex items-center justify-between text-xs">
-          <span class="text-slate-400 font-semibold flex items-center gap-1.5">
-            <span>⚠️ Status Diagnostik Error:</span>
-          </span>
-          <span id="troubleshoot-timestamp" class="text-[10px] font-mono text-slate-500">16:05:00</span>
+          <span class="text-[#888886] font-semibold">Status Diagnostik:</span>
+          <span id="troubleshoot-timestamp" class="text-[10px] font-mono text-[#888886]">16:05:00</span>
         </div>
-        <div id="troubleshoot-error-message" class="text-xs font-mono font-semibold text-rose-300 bg-rose-950/40 p-2.5 rounded-lg border border-rose-900/50 break-words">
-          Koneksi SSH Timeout: Komputer target 192.168.27.203:22 tidak merespons (Port 22 mungkin belum dibuka atau service SSHD belum berjalan).
+        <div id="troubleshoot-error-message" class="text-xs font-mono font-semibold text-[#DC2626] bg-[#FEF2F2] p-2.5 rounded-lg border border-[#FECACA] break-words">
+          Koneksi SSH Timeout: Komputer target tidak merespons.
         </div>
         <div class="flex items-center justify-between pt-1">
-          <span class="text-[11px] text-slate-400 font-sans">Salin log error ini untuk analisis atau pelaporan:</span>
-          <button id="copy-troubleshoot-log-btn" class="px-3 py-1 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 transition flex items-center gap-1.5 shadow">
-            <span>📋 Salin Pesan Log</span>
+          <span class="text-[11px] text-[#888886]">Salin pesan log error:</span>
+          <button id="copy-troubleshoot-log-btn" class="btn btn-ghost btn-sm text-[11px] flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            <span>Salin Pesan</span>
           </button>
         </div>
       </div>
 
       <!-- Quick 1-Line PowerShell Fix Copy -->
-      <div class="p-3.5 rounded-xl bg-slate-900/90 border border-cyan-500/30 space-y-2">
+      <div class="p-3.5 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] space-y-2">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
-            <span>⚡ Solusi Instan (Perintah Auto-Fix PowerShell Administrator):</span>
+          <span class="text-xs font-bold text-[#0A0A0A]">
+            Perintah Auto-Fix PowerShell Administrator:
           </span>
-          <button id="copy-powershell-fix-btn" class="px-3 py-1 rounded-lg text-xs font-bold bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-400/40 transition flex items-center gap-1.5 shadow">
-            <span>📋 Salin Script PowerShell</span>
+          <button id="copy-powershell-fix-btn" class="btn btn-black btn-sm text-[11px] flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            <span>Salin Script</span>
           </button>
         </div>
-        <p class="text-[11px] text-slate-400">Jalankan di <b>PowerShell Administrator</b> pada komputer target untuk memastikan Port 22 terbuka dan Service SSHD aktif:</p>
-        <pre id="powershell-fix-code" class="text-[11px] font-mono text-emerald-300 bg-slate-950 p-2.5 rounded-lg border border-slate-800 overflow-x-auto select-all whitespace-pre-wrap break-all">$p="$env:windir\System32\OpenSSH\sshd.exe"; if (-not (Test-Path $p)) { $p="$env:ProgramFiles\OpenSSH\sshd.exe" }; if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { & sc.exe create sshd binPath= "`"$p`"" start= auto DisplayName= "OpenSSH SSH Server" }; & "$env:windir\System32\OpenSSH\ssh-keygen.exe" -A; Set-Service sshd -StartupType Automatic; Start-Service sshd; netsh advfirewall firewall add rule name="OpenSSH-Server-In-TCP-22" dir=in action=allow protocol=TCP localport=22 profile=any; Write-Host "SSH PORT 22 AKTIF!" -ForegroundColor Green</pre>
-      </div>
-
-      <!-- Interactive Checklist -->
-      <div class="space-y-2">
-        <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Langkah Pengecekan & Pemecahan Masalah:</h4>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-          <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-2">
-            <span class="text-cyan-400 font-bold">1.</span>
-            <span class="text-slate-300">Pastikan PC target menyala dan terhubung ke WiFi / LAN yang sama.</span>
-          </div>
-          <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-2">
-            <span class="text-cyan-400 font-bold">2.</span>
-            <span class="text-slate-300">Jalankan <code class="text-cyan-300">setup_target_ssh_1click.bat</code> (Run as Administrator) di target.</span>
-          </div>
-          <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-2">
-            <span class="text-cyan-400 font-bold">3.</span>
-            <span class="text-slate-300">Pastikan status service <code class="text-cyan-300">sshd</code> adalah <b>Running</b> di target.</span>
-          </div>
-          <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-2">
-            <span class="text-cyan-400 font-bold">4.</span>
-            <span class="text-slate-300">Pastikan Username & Password login Windows di Vault sudah sesuai.</span>
-          </div>
-        </div>
+        <p class="text-[11px] text-[#888886]">Jalankan di <b>PowerShell Administrator</b> pada komputer target untuk membuka Port <span id="troubleshoot-port-label" class="font-bold font-mono text-[#0A0A0A]">22</span> dan mengonfigurasi OpenSSH:</p>
+        <pre id="powershell-fix-code" class="text-[11px] font-mono text-[#0A0A0A] bg-white p-2.5 rounded-lg border border-[#E5E5E3] overflow-x-auto select-all whitespace-pre-wrap break-all">if (-not (Get-Service sshd -ErrorAction SilentlyContinue) -and -not (Test-Path "$env:windir\System32\OpenSSH\sshd.exe")) { try { Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction SilentlyContinue | Out-Null } catch {} }; $p="$env:windir\System32\OpenSSH\sshd.exe"; if (-not (Test-Path $p)) { $p="$env:ProgramFiles\OpenSSH\sshd.exe" }; if (-not (Get-Service sshd -ErrorAction SilentlyContinue) -and (Test-Path $p)) { & sc.exe create sshd binPath= "`"$p`"" start= auto DisplayName= "OpenSSH SSH Server" | Out-Null }; $cfg="C:\ProgramData\ssh\sshd_config"; if (Test-Path $cfg) { $lines = Get-Content $cfg | Where-Object { $_ -notmatch '^\s*#?\s*Port\s+' -and $_ -notmatch '^\s*#?\s*PasswordAuthentication\s+' }; $lines = @("Port 22", "PasswordAuthentication yes") + $lines; $lines | Set-Content -Encoding ASCII $cfg } else { New-Item -ItemType Directory -Path "C:\ProgramData\ssh" -Force | Out-Null; @("Port 22", "ListenAddress 0.0.0.0", "PasswordAuthentication yes") | Set-Content -Encoding ASCII $cfg }; $kg="$env:windir\System32\OpenSSH\ssh-keygen.exe"; if (Test-Path $kg) { & $kg -A 2>$null }; Set-Service sshd -StartupType Automatic -ErrorAction SilentlyContinue; Restart-Service sshd -Force -ErrorAction SilentlyContinue; netsh advfirewall firewall delete rule name="OpenSSH-Server-In-TCP-22" >$null 2>&1; netsh advfirewall firewall add rule name="OpenSSH-Server-In-TCP-22" dir=in action=allow protocol=TCP localport=22 profile=any | Out-Null; Write-Host "BERHASIL: SSH SERVICE DAN FIREWALL AKTIF DI PORT 22!" -ForegroundColor Green</pre>
       </div>
 
       <!-- Action Footer -->
-      <div class="flex items-center justify-between pt-3 border-t border-slate-800">
-        <button id="troubleshoot-edit-vault-btn" class="px-4 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 text-xs font-bold transition flex items-center gap-1.5">
-          <span>⚙️ Edit Profil di Vault</span>
+      <div class="flex items-center justify-between pt-3 border-t border-[#E5E5E3]">
+        <button id="troubleshoot-edit-vault-btn" class="btn btn-ghost btn-sm flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><circle cx="12" cy="12" r="3" stroke-width="2"></circle></svg>
+          <span>Edit di Vault</span>
         </button>
         <div class="flex items-center space-x-2">
-          <button id="troubleshoot-retry-btn" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-slate-950 font-extrabold text-xs shadow-lg shadow-cyan-500/20 transition flex items-center gap-1.5">
-            <span>🔄 Coba Hubungkan Ulang</span>
+          <button id="troubleshoot-retry-btn" class="btn btn-black btn-sm flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <span>Hubungkan Ulang</span>
           </button>
-          <button id="troubleshoot-dismiss-btn" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition">
+          <button id="troubleshoot-dismiss-btn" class="btn btn-ghost btn-sm">
             Tutup
           </button>
         </div>
@@ -858,10 +937,10 @@
     </div>
   </div>
 
-  <!-- Global Cyber NOC Floating Tooltip -->
+  <!-- Global Floating Tooltip -->
   <div id="cyber-floating-tooltip" class="cyber-floating-tooltip tooltip-hidden"></div>
 
   <!-- JavaScript Logic -->
-  <script src="app.js?v=20260907_pulse_fix"></script>
+  <script src="app.js?v=20260914_dss_v1"></script>
 </body>
 </html>

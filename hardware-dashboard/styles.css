@@ -1,59 +1,399 @@
-/* Custom Modern Cyber NOC Glassmorphism & Animations */
+/* ================================================================
+   DSS-V1 Signature Luxury Minimalist Design System (Light & Dark)
+   Source Inspiration: D:\Faris\Github\DSS_v1
+   ================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap');
 
 :root {
+  --bg:          #F9F9F7;
+  --bg-card:     #FFFFFF;
+  --bg-muted:    #F4F4F2;
+  --border:      #E5E5E3;
+  --border-dark: #D0D0CE;
+  --text-1:      #0A0A0A;
+  --text-2:      #4A4A48;
+  --text-3:      #888886;
+  --text-inv:    #FFFFFF;
+  --accent:      #0A0A0A;
+  --accent-h:    #2A2A2A;
+  --success:     #16A34A;
+  --warning:     #D97706;
+  --danger:      #DC2626;
+  --orange:       #F97316;
+  --radius-sm:   6px;
+  --radius:      10px;
+  --radius-lg:   16px;
+  --radius-xl:   20px;
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow:      0 4px 16px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
+  --shadow-lg:   0 12px 40px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+  --transition:  all 0.18s cubic-bezier(0.4,0,0.2,1);
+  --font:        'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif:  'DM Serif Display', Georgia, serif;
+  --font-mono:   'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --gauge-transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Dark Mode Tokens (DSS-V1 Obsidian Minimalist Luxury) */
+[data-theme="dark"] {
+  --bg:          #0A0A0A;
+  --bg-card:     #141414;
+  --bg-muted:    #1C1C1C;
+  --border:      #262626;
+  --border-dark: #383838;
+  --text-1:      #EDEDED;
+  --text-2:      #A1A1A1;
+  --text-3:      #737373;
+  --text-inv:    #0A0A0A;
+  --accent:      #FFFFFF;
+  --accent-h:    #E5E5E5;
+  --success:     #22C55E;
+  --warning:     #F59E0B;
+  --danger:      #EF4444;
+  --orange:       #FB923C;
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.4);
+  --shadow:      0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:   0 12px 40px rgba(0,0,0,0.7);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background-color: #080c14;
-  color: #f1f5f9;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text-1);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* Glassmorphism Card Style */
-.glass-card {
-  background: rgba(15, 23, 42, 0.72);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 
-              0 0 15px -3px rgba(6, 182, 212, 0.08);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* Force Tabular Figures for All Numbers (No Robotic Terminal Monospace) */
+span, div, p, td, th, b, label, input, button {
+  font-family: var(--font);
 }
 
-.glass-card:hover {
-  box-shadow: 0 14px 35px -10px rgba(0, 0, 0, 0.6), 
-              0 0 20px -2px rgba(6, 182, 212, 0.15);
-  border-color: rgba(6, 182, 212, 0.35);
-}
-
-/* Custom Scrollbar */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
-  border-radius: 4px;
+  background: var(--bg);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.3);
+  background: var(--border-dark);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(56, 189, 248, 0.6);
+  background: var(--text-3);
+}
+
+/* Card Surface */
+.card, .glass-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+
+.card:hover, .glass-card:hover {
+  box-shadow: var(--shadow);
+  border-color: var(--border-dark);
+}
+
+/* Typography Helpers */
+.font-serif-display {
+  font-family: var(--font-serif);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  border: 1px solid transparent;
+  text-decoration: none;
+  font-family: var(--font);
+  white-space: nowrap;
+}
+
+.btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.btn-black {
+  background: var(--text-1);
+  color: var(--text-inv) !important;
+  border-color: var(--text-1);
+}
+
+.btn-black:hover {
+  background: var(--accent-h);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-2);
+  border-color: var(--border);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-muted);
+  color: var(--text-1);
+  border-color: var(--border-dark);
+}
+
+.btn-sm {
+  padding: 5px 11px;
+  font-size: 0.775rem;
+  border-radius: var(--radius-sm);
+}
+
+.btn-danger-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--danger);
+}
+
+.btn-danger-ghost:hover {
+  background: rgba(220, 38, 38, 0.1);
+  border-color: rgba(220, 38, 38, 0.2);
+}
+
+/* Filter Pills */
+.filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  text-decoration: none;
+  transition: var(--transition);
+}
+
+.filter-pill:hover {
+  border-color: var(--border-dark);
+  color: var(--text-1);
+  background: var(--bg-muted);
+}
+
+.filter-pill.active {
+  background: var(--text-1);
+  border-color: var(--text-1);
+  color: var(--text-inv) !important;
+}
+
+.filter-pill .pill-count {
+  background: var(--bg-muted);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 0.72rem;
+  color: var(--text-2);
+}
+
+.filter-pill.active .pill-count {
+  background: rgba(125, 125, 125, 0.25);
+  color: var(--text-inv);
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-new, .badge-success {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--success);
+  border: 1px solid rgba(22, 163, 74, 0.25);
+}
+
+.badge-used, .badge-warning {
+  background: rgba(217, 119, 6, 0.12);
+  color: var(--warning);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+}
+
+.badge-disc, .badge-danger {
+  background: rgba(220, 38, 38, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+}
+
+.badge-neutral {
+  background: var(--bg-muted);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+
+/* Solid Blinking Dots & Pulses (Requirement 7) */
+@keyframes status-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.2;
+    transform: scale(0.85);
+  }
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  display: inline-block;
+  flex-shrink: 0;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.1);
+}
+
+.pulse-slow {
+  animation: status-pulse 2.2s infinite ease-in-out;
+}
+
+.pulse-medium {
+  animation: status-pulse 1.0s infinite ease-in-out;
+}
+
+.pulse-fast {
+  animation: status-pulse 0.35s infinite ease-in-out;
+}
+
+/* Table Card */
+.table-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead tr {
+  background: var(--bg-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+thead th {
+  padding: 9px 14px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: var(--transition);
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--bg-muted);
+}
+
+td {
+  padding: 10px 14px;
+  font-size: 0.84rem;
+  color: var(--text-2);
+  vertical-align: middle;
+}
+
+td.name-col {
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+/* Form Controls */
+.form-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  padding: 9px 13px;
+  font-size: 0.875rem;
+  font-family: var(--font);
+  transition: var(--transition);
+  outline: none;
+  appearance: none;
+}
+
+.form-input::placeholder {
+  color: var(--text-3);
+}
+
+.form-input:focus {
+  border-color: var(--text-1);
+  box-shadow: 0 0 0 3px rgba(125, 125, 125, 0.15);
 }
 
 /* Animated Fan Spin */
 @keyframes spin-slow {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .fan-icon-spin svg {
@@ -63,46 +403,19 @@ body {
 
 .fan-icon-spin.stall svg {
   animation: none !important;
-  color: #f43f5e !important;
+  color: var(--danger) !important;
 }
 
-/* Neon Glow Accents */
-.glow-cyan {
-  text-shadow: 0 0 12px rgba(34, 211, 238, 0.6);
-}
-
-.glow-rose {
-  text-shadow: 0 0 12px rgba(244, 63, 94, 0.6);
-}
-
-.glow-emerald {
-  text-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
-}
-
-/* Circular Gauge Smooth Transition */
+/* Circular Gauge */
 circle {
   transition: var(--gauge-transition);
 }
 
-/* Alert Flash Animation */
-@keyframes alert-pulse {
-  0%, 100% {
-    background-color: rgba(225, 29, 72, 0.95);
-  }
-  50% {
-    background-color: rgba(159, 18, 57, 0.95);
-  }
-}
-
-.animate-alert-bar {
-  animation: alert-pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-/* Modal Animation */
+/* Modal scale */
 @keyframes modal-scale {
   from {
     opacity: 0;
-    transform: scale(0.95) translateY(-10px);
+    transform: scale(0.96) translateY(-8px);
   }
   to {
     opacity: 1;
@@ -111,31 +424,26 @@ circle {
 }
 
 .animate-modal {
-  animation: modal-scale 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: modal-scale 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* ==========================================================================
-   Cyber NOC Floating Tooltip Engine
-   ========================================================================== */
+/* Clean Floating Tooltip */
 .cyber-floating-tooltip {
   position: fixed;
   pointer-events: none;
   z-index: 99999;
   max-width: 460px;
   min-width: 200px;
-  background: rgba(10, 15, 29, 0.97);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(6, 182, 212, 0.45);
-  border-radius: 10px;
-  box-shadow: 0 16px 40px -4px rgba(0, 0, 0, 0.85), 
-              0 0 24px -2px rgba(6, 182, 212, 0.25);
+  background: var(--bg-card);
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
   padding: 10px 14px;
-  color: #f1f5f9;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: var(--text-1);
+  font-family: var(--font);
   font-size: 12px;
   line-height: 1.5;
-  transition: opacity 0.1s ease-out, transform 0.1s ease-out;
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out;
   word-break: break-word;
 }
 
@@ -159,7 +467,7 @@ circle {
   gap: 8px;
   margin-bottom: 6px;
   padding-bottom: 5px;
-  border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+  border-bottom: 1px solid var(--border);
 }
 
 .cyber-floating-tooltip .tooltip-title {
@@ -167,7 +475,7 @@ circle {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #22d3ee;
+  color: var(--text-1);
   display: flex;
   align-items: center;
   gap: 5px;
@@ -175,60 +483,255 @@ circle {
 
 .cyber-floating-tooltip .tooltip-badge {
   font-size: 10px;
-  font-family: ui-monospace, monospace;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(6, 182, 212, 0.15);
-  color: #67e8f9;
-  border: 1px solid rgba(6, 182, 212, 0.3);
+  background: var(--bg-muted);
+  color: var(--text-2);
+  border: 1px solid var(--border);
 }
 
 .cyber-floating-tooltip .tooltip-body {
-  color: #cbd5e1;
+  color: var(--text-2);
   font-size: 11.5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .cyber-floating-tooltip .tooltip-meta {
   margin-top: 6px;
   padding-top: 5px;
-  border-top: 1px dashed rgba(51, 65, 85, 0.6);
+  border-top: 1px dashed var(--border);
   font-size: 10px;
-  color: #94a3b8;
+  color: var(--text-3);
   display: flex;
   justify-content: space-between;
 }
 
-/* Hoverable Truncated Element Indicator */
-.truncate-hoverable {
-  cursor: help !important;
+/* Dark Mode Theme-Specific Classes */
+[data-theme="dark"] .bg-white {
+  background-color: var(--bg-card) !important;
+}
+
+[data-theme="dark"] .bg-\[\#F9F9F7\] {
+  background-color: var(--bg) !important;
+}
+
+[data-theme="dark"] .bg-\[\#F4F4F2\] {
+  background-color: var(--bg-muted) !important;
+}
+
+[data-theme="dark"] .border-\[\#E5E5E3\] {
+  border-color: var(--border) !important;
+}
+
+[data-theme="dark"] .border-\[\#D0D0CE\] {
+  border-color: var(--border-dark) !important;
+}
+
+[data-theme="dark"] .text-\[\#0A0A0A\] {
+  color: var(--text-1) !important;
+}
+
+[data-theme="dark"] .text-\[\#4A4A48\] {
+  color: var(--text-2) !important;
+}
+
+[data-theme="dark"] .text-\[\#888886\] {
+  color: var(--text-3) !important;
+}
+
+[data-theme="dark"] pre {
+  background-color: var(--bg-muted) !important;
+  color: var(--text-1) !important;
+  border-color: var(--border) !important;
+}
+
+[data-theme="dark"] .bg-\[\#E5E5E3\] {
+  background-color: var(--border) !important;
+}
+
+[data-theme="dark"] .bg-\[\#0A0A0A\]:not(.btn-black):not(.badge-neutral):not(.w-8) {
+  background-color: var(--accent) !important;
+}
+
+/* Progress Bars */
+.progress-track {
+  background-color: var(--border);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progress-bar-orange {
+  background-color: #F97316 !important;
+}
+
+.progress-bar-green {
+  background-color: #16A34A !important;
+}
+
+.progress-bar-red {
+  background-color: #DC2626 !important;
+}
+
+/* Outermost Dot Background Canvas (DSS-V1 Signature Grid) */
+#bg-dot-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Table Dark Mode Hover & Contrast Overrides */
+[data-theme="dark"] tbody tr:hover,
+[data-theme="dark"] .hover\:bg-\[\#F8F8F6\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#F9F9F7\]:hover {
+  background-color: var(--bg-muted) !important;
+}
+
+[data-theme="dark"] tbody tr:hover td {
+  color: var(--text-1) !important;
+}
+
+[data-theme="dark"] tbody tr:hover td.text-\[\#4A4A48\] {
+  color: var(--text-2) !important;
+}
+
+[data-theme="dark"] tbody tr:hover td.text-\[\#888886\] {
+  color: var(--text-3) !important;
+}
+
+/* Sticky Table Action Column */
+.table-sticky-action {
+  position: sticky;
+  right: 0;
+  background: var(--bg-card);
+  z-index: 5;
+}
+
+[data-theme="dark"] .table-sticky-action {
+  background: var(--bg-card) !important;
+}
+
+/* Floating Sidebar Navigation (DSS-V1 Minimalist Floating Dock) */
+.side-navbar {
+  position: fixed;
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+@media (max-width: 1360px) {
+  .side-navbar {
+    display: none; /* Hide on smaller viewports to prevent layout overlap */
+  }
+}
+
+.side-nav-item {
   position: relative;
-  transition: all 0.2s ease;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: var(--transition);
+  cursor: pointer;
+  text-decoration: none;
 }
 
-.truncate-hoverable:hover {
-  text-decoration: underline dotted rgba(34, 211, 238, 0.7);
-  text-underline-offset: 3px;
-  color: #67e8f9 !important;
+.side-nav-item:hover {
+  color: var(--text-1);
+  background: var(--bg-muted);
+  border-color: var(--border);
 }
 
-/* Security Threat Badges */
-.badge-sec-critical {
-  background: rgba(244, 63, 94, 0.2);
-  color: #fb7185;
-  border: 1px solid rgba(244, 63, 94, 0.4);
+.side-nav-item.active {
+  color: var(--text-1);
+  background: var(--bg-muted);
+  border-color: var(--border-dark);
+  box-shadow: var(--shadow-sm);
 }
 
-.badge-sec-warning {
-  background: rgba(245, 158, 11, 0.2);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+.side-nav-item .side-nav-tooltip {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: var(--text-1);
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.badge-sec-info {
-  background: rgba(6, 182, 212, 0.2);
-  color: #22d3ee;
-  border: 1px solid rgba(6, 182, 212, 0.4);
+.side-nav-item:hover .side-nav-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(2px);
 }
+
+/* ==========================================================================
+   DENSITY MODES (Clean SOC vs btop SysAdmin Compact)
+   ========================================================================== */
+body.density-compact .p-4 {
+  padding: 0.75rem !important;
+}
+
+body.density-compact .p-5 {
+  padding: 0.9rem !important;
+}
+
+body.density-compact .gap-3\.5 {
+  gap: 0.6rem !important;
+}
+
+body.density-compact .space-y-3 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.5rem !important;
+}
+
+body.density-compact .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.65rem !important;
+}
+
+body.density-compact table td {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+  font-size: 11px !important;
+}
+
+body.density-compact table th {
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+  font-size: 10px !important;
+}
+
+body.density-compact .text-3xl {
+  font-size: 1.5rem !important;
+  line-height: 1.8rem !important;
+}
+
 

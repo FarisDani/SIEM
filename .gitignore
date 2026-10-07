@@ -1,0 +1,28 @@
+# Python cache & compiled bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Local runtime & temporary telemetry probes
+.local_probe.ps1
+*.log
+
+# Environment & local credentials
+.env
+.venv
+env/
+venv/
+ENV/
+
+# System / OS generated files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE & Editor settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace

@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SIEM & SOC Security Operations Center</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['var(--font)', 'sans-serif'],
+            serif: ['var(--font-serif)', 'serif'],
+            mono: ['var(--font-mono)', 'monospace'],
+          },
+          colors: {
+            dss: {
+              bg: '#F9F9F7',
+              card: '#FFFFFF',
+              muted: '#F4F4F2',
+              border: '#E5E5E3',
+              borderDark: '#D0D0CE',
+              text1: '#0A0A0A',
+              text2: '#4A4A48',
+              text3: '#888886',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts: DM Sans, DM Serif Display, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Custom DSS-V1 Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-[#F9F9F7] text-[#0A0A0A] min-h-screen antialiased selection:bg-[#0A0A0A] selection:text-white relative">
+
+  <!-- Interactive Dot Canvas Background (Outermost Layer, Behind Everything) -->
+  <canvas id="bg-dot-canvas"></canvas>
+
+  <!-- FLOATING SIDEBAR SECTION NAVIGATION (DSS-V1 DOCK) -->
+  <aside class="side-navbar" aria-label="Section Navigation">
+    <a href="#section-sentinel" class="side-nav-item active" data-section="section-sentinel" title="Sentinel Summary">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+      </svg>
+      <span class="side-nav-tooltip">Sentinel Summary</span>
+    </a>
+    <a href="#section-trends" class="side-nav-item" data-section="section-trends" title="Telemetry Trends">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+      </svg>
+      <span class="side-nav-tooltip">Telemetry Trends</span>
+    </a>
+    <a href="#section-storage" class="side-nav-item" data-section="section-storage" title="Storage Drives">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path>
+      </svg>
+      <span class="side-nav-tooltip">Storage Drives</span>
+    </a>
+    <a href="#section-soc" class="side-nav-item" data-section="section-soc" title="Security Center (SOC)">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+      </svg>
+      <span class="side-nav-tooltip">Security Center (SOC)</span>
+    </a>
+  </aside>
+
+  <!-- Global SIEM Alert Bar -->
+  <div id="global-alert-banner" class="hidden sticky top-0 z-50 py-2 px-4 shadow-sm flex items-center justify-between text-white font-mono text-xs bg-[#DC2626] border-b border-[#B91C1C]">
+    <div class="flex items-center space-x-3">
+      <span class="p-1 rounded bg-white/20 flex items-center justify-center">
+        <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+        </svg>
+      </span>
+      <span id="global-alert-title" class="font-bold uppercase tracking-wide">SECURITY ANOMALY DETECTED</span>
+      <span class="hidden md:inline-block text-white/70">&bull;</span>
+      <span id="global-alert-msg" class="text-white/90">Anomali keamanan terdeteksi.</span>
+    </div>
+    <div class="flex items-center space-x-2">
+      <button id="dismiss-alert-btn" class="px-2.5 py-0.5 rounded bg-black/30 hover:bg-black/50 text-white text-[11px] font-semibold transition">Acknowledge</button>
+    </div>
+  </div>
+
+  <!-- Main Container -->
+  <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-5">
+
+    <!-- TOP MULTI-DEVICE TAB BAR -->
+    <section class="card p-3 border border-[#E5E5E3] shadow-sm bg-white">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-bold uppercase tracking-wider text-[#888886] font-mono mr-1">Endpoints:</span>
+          <!-- Dynamic Device Tabs Container -->
+          <div id="top-node-tabs-container" class="flex flex-wrap items-center gap-2">
+            <!-- Dynamically generated via siem.js -->
+          </div>
+          <button id="btn-add-device-profile" class="btn btn-black btn-sm flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+            <span>Tambah Profil</span>
+          </button>
+          <button id="btn-manage-profiles" title="Kelola Profil Perangkat" class="btn btn-ghost btn-sm p-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Mode Switcher & Dark Mode Toggle -->
+        <div class="flex items-center space-x-2">
+          <button id="theme-toggle-btn" class="btn btn-ghost btn-sm flex items-center gap-1.5" title="Beralih Tema (Dark / Light)">
+            <span id="theme-icon" class="flex items-center">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+              </svg>
+            </span>
+            <span id="theme-text">Dark</span>
+          </button>
+          <a href="index.html" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm flex items-center gap-1.5" title="Buka Mode Hybrid Hardware NOC di tab baru">
+            <span>Hardware NOC ↗</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Top Header: Title & Live Status -->
+    <header class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pb-3 border-b border-[#E5E5E3]">
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-lg bg-[#0A0A0A] flex items-center justify-center text-white font-bold text-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight text-[#0A0A0A] flex items-center gap-2">
+            <span>SIEM & SOC Operations</span>
+            <span class="badge badge-neutral text-[11px]">SOC EDITION</span>
+          </h1>
+        </div>
+      </div>
+
+      <!-- Live Active Device Status -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        <div id="connection-badge" class="badge badge-success flex items-center gap-1.5 py-1 px-3">
+          <span id="connection-status-dot" class="status-dot pulse-slow" style="background-color: #16A34A; color: #16A34A;"></span>
+          <span id="connection-status-text">SSH ACTIVE</span>
+        </div>
+
+        <div class="px-3 py-1 rounded-lg bg-white border border-[#E5E5E3] flex items-center gap-1.5 text-xs">
+          <span class="text-[#888886]">Target:</span>
+          <span id="active-node-name" class="text-[#0A0A0A] font-bold">Target Device</span>
+        </div>
+
+        <!-- LAN Access URL Badge (1-Click Copy for other devices) -->
+        <button id="btn-copy-lan-url" onclick="copyLanUrl(this)" class="px-2.5 py-1 rounded-lg bg-[#F4F4F2] hover:bg-[#EAEAEA] border border-[#E5E5E3] flex items-center gap-1.5 text-xs font-mono text-[#0A0A0A] transition" title="Klik untuk salin alamat akses dashboard untuk HP/Tablet/Laptop lain">
+          <svg class="w-3.5 h-3.5 text-[#16A34A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path>
+          </svg>
+          <span class="text-[#888886]">Akses LAN:</span>
+          <span id="badge-lan-url" class="font-bold">192.168.27.41:8088</span>
+        </button>
+
+        <!-- Density Toggle (btop SysAdmin Compact vs Clean SOC) -->
+        <button id="btn-density-toggle" onclick="toggleDensityMode()" class="px-2.5 py-1 rounded-lg bg-white hover:bg-[#F4F4F2] border border-[#E5E5E3] flex items-center gap-1.5 text-xs text-[#0A0A0A] font-semibold transition" title="Toggle kerapatan tampilan (Kompak btop style vs Luas SOC)">
+          <svg class="w-3.5 h-3.5 text-[#888886]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+          </svg>
+          <span id="density-text">Kompak</span>
+        </button>
+
+        <button id="toggle-stream-btn" class="btn btn-black btn-sm flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <span>Stream Active</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- SECTION 1: ENDPOINT & SENTINEL METRIC CARDS -->
+    <section id="section-sentinel" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-sm font-bold text-[#0A0A0A] flex items-center gap-2">
+              <span id="host-name">TARGET-ENDPOINT</span>
+              <span id="os-caption-text" class="text-xs font-mono font-normal text-[#888886]">Windows OS</span>
+            </h2>
+            <div class="text-xs font-mono text-[#4A4A48]" id="cpu-model">—</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 font-mono text-xs">
+          <span class="text-[#888886]">Uptime:</span>
+          <span id="sys-uptime-text" class="px-2 py-0.5 rounded bg-[#F4F4F2] border border-[#E5E5E3] text-[#0A0A0A] font-bold">—</span>
+          <span id="security-state-badge" class="badge badge-success font-bold">SECURE</span>
+        </div>
+      </div>
+
+      <!-- 4 SENTINEL METRIC CARDS -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        
+        <!-- CARD 1: CPU Saturation -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[#888886]">CPU Saturation</span>
+            <div id="cpu-load-badge" class="badge badge-success flex items-center gap-1.5 py-0.5 px-2">
+              <span id="cpu-status-dot" class="status-dot pulse-slow" style="background-color: #16A34A; color: #16A34A;"></span>
+              <span id="cpu-status-text">NORMAL</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between py-0.5">
+            <div>
+              <div class="text-3xl font-black font-mono text-[#0A0A0A]" id="stat-cpu-val">—%</div>
+              <div class="text-[11px] text-[#888886] font-mono mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span>VCore: <b id="vcore-val" class="text-[#0A0A0A] font-bold">— V</b></span>
+                <span class="text-[#D0D0CE]">•</span>
+                <span title="Load Average (1m, 5m, 15m) ala btop">Load: <b id="cpu-loadavg-val" class="text-[#0A0A0A] font-bold">— — —</b></span>
+              </div>
+            </div>
+            <div class="text-right font-mono text-xs">
+              <div class="text-[#888886]">Temp: <span id="cpu-temp-val" class="text-[#0A0A0A] font-bold">—°C</span></div>
+              <div class="text-[#888886] mt-1">Daya: <span id="cpu-power-val" class="text-[#0A0A0A] font-bold">— W</span></div>
+            </div>
+          </div>
+          <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden">
+            <div id="cpu-load-bar" class="bg-[#F97316] h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+
+          <!-- HTOP Tasks & Live Per-Core Digital Bars -->
+          <div class="pt-2 border-t border-[#E5E5E3] space-y-1.5">
+            <div class="flex items-center justify-between text-[10px] font-mono text-[#888886]">
+              <span>Tasks: <b id="stat-tasks-procs" class="text-[#0A0A0A] font-bold">—</b></span>
+              <div class="flex items-center gap-1.5">
+                <span>Threads: <b id="stat-tasks-threads" class="text-[#0A0A0A] font-bold">—</b></span>
+                <button id="btn-toggle-cores" onclick="toggleCoresGrid()" class="px-1.5 py-0.5 rounded bg-white hover:bg-[#F4F4F2] border border-[#E5E5E3] text-[#4A4A48] hover:text-[#0A0A0A] font-sans text-[9px] transition" title="Toggle tinggi grid core CPU">Expand</button>
+              </div>
+            </div>
+            <div id="cpu-cores-grid" class="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[9px] max-h-[84px] overflow-y-auto pr-0.5">
+              <!-- Rendered via siem.js -->
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 2: Memory Saturation -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[#888886]">Memory Saturation</span>
+            <div id="ram-load-badge" class="badge badge-success flex items-center gap-1.5 py-0.5 px-2">
+              <span id="ram-status-dot" class="status-dot pulse-slow" style="background-color: #16A34A; color: #16A34A;"></span>
+              <span id="ram-status-text">OPTIMAL</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between py-0.5">
+            <div>
+              <div class="text-3xl font-black font-mono text-[#0A0A0A]" id="stat-ram-val">—%</div>
+              <div class="text-[11px] text-[#888886] font-mono mt-0.5"><span id="ram-used-text">— GB</span> / <span id="ram-total-text">— GB</span></div>
+            </div>
+            <div class="text-right font-mono text-xs">
+              <div class="text-[#888886]">Free: <span id="ram-free-text" class="text-[#0A0A0A] font-bold">— GB</span></div>
+              <div class="text-[#888886] text-[10px] mt-1" id="ram-clock-text">DDR RAM</div>
+            </div>
+          </div>
+
+          <!-- HTOP Multi-Segment RAM Bar (Active Used, Cache, Free) -->
+          <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden flex">
+            <div id="ram-used-segment" class="bg-[#16A34A] h-full transition-all duration-500" style="width: 0%" title="Active Used RAM"></div>
+            <div id="ram-cache-segment" class="bg-[#F97316] h-full transition-all duration-500" style="width: 0%" title="Standby Cache RAM"></div>
+          </div>
+
+          <!-- HTOP Memory Breakdown & Commit Limit -->
+          <div class="pt-2 border-t border-[#E5E5E3] space-y-1 font-mono text-[10px]">
+            <div class="flex items-center justify-between text-[#888886]">
+              <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#16A34A]"></span>Used: <b id="ram-detail-used" class="text-[#0A0A0A]">—</b></span>
+              <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#F97316]"></span>Cache: <b id="ram-detail-cache" class="text-[#0A0A0A]">—</b></span>
+              <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#888886]"></span>Free: <b id="ram-detail-free" class="text-[#0A0A0A]">—</b></span>
+            </div>
+            <!-- Dedicated btop Swap / Pagefile Meter -->
+            <div class="flex items-center justify-between text-[#888886] pt-0.5 border-t border-[#E5E5E3]/60">
+              <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]"></span>Swap / Page: <b id="ram-swap-text" class="text-[#0A0A0A] font-bold">— / — GB</b></span>
+              <span id="ram-swap-pct" class="text-[#888886] font-bold">0%</span>
+            </div>
+            <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden">
+              <div id="ram-swap-bar" class="bg-[#8B5CF6] h-full transition-all duration-500" style="width: 0%" title="Swap / Virtual Memory"></div>
+            </div>
+
+            <div class="flex items-center justify-between text-[#888886] pt-0.5 text-[9px]">
+              <span>Commit Limit:</span>
+              <span id="ram-commit-text" class="text-[#4A4A48] font-bold">— / — GB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 3: Storage Drive Integrity & I/O (btop style) -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[#888886]">Drive Integrity & I/O</span>
+            <div id="storage-health-badge" class="badge badge-success flex items-center gap-1.5 py-0.5 px-2">
+              <span id="storage-status-dot" class="status-dot pulse-slow" style="background-color: #16A34A; color: #16A34A;"></span>
+              <span id="storage-status-text">HEALTHY</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between py-0.5">
+            <div>
+              <div class="text-2xl font-bold font-mono text-[#0A0A0A]" id="storage-temp-val">—°C</div>
+              <div class="text-[11px] text-[#888886] font-mono mt-0.5">SMART: <span id="storage-health-text" class="text-[#0A0A0A] font-bold">OK</span></div>
+            </div>
+            <div class="text-right font-mono text-xs">
+              <div class="text-[#888886]">Disk Activity:</div>
+              <div class="text-[#0A0A0A] font-bold text-sm" id="storage-activity-text">0.0%</div>
+            </div>
+          </div>
+
+          <!-- BTOP Disk Real-Time I/O Read / Write Rates -->
+          <div class="flex items-center justify-between text-[11px] font-mono bg-white/70 px-2 py-1 rounded border border-[#E5E5E3]">
+            <span class="flex items-center gap-1 text-[#16A34A] font-bold">
+              <span>↓ R:</span>
+              <span id="storage-read-val" class="text-[#0A0A0A]">0.0 MB/s</span>
+            </span>
+            <span class="text-[#D0D0CE]">|</span>
+            <span class="flex items-center gap-1 text-[#2563EB] font-bold">
+              <span>↑ W:</span>
+              <span id="storage-write-val" class="text-[#0A0A0A]">0.0 MB/s</span>
+            </span>
+          </div>
+
+          <!-- Disk Activity Meter Bar -->
+          <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 overflow-hidden">
+            <div id="storage-activity-bar" class="bg-[#2563EB] h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+
+          <!-- Partition Usage Breakdown Preview -->
+          <div class="pt-2 border-t border-[#E5E5E3] flex justify-between items-center text-[10px] font-mono text-[#888886]">
+            <span class="truncate max-w-[120px]" id="storage-model-text">Physical Drive</span>
+            <span id="storage-part-summary" class="text-[#0A0A0A] font-bold truncate max-w-[140px] text-right">—</span>
+          </div>
+        </div>
+
+        <!-- CARD 4: Network Throughput -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] flex flex-col justify-between space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[#888886]">Network Traffic</span>
+            <div id="net-health-badge" class="badge badge-success flex items-center gap-1.5 py-0.5 px-2">
+              <span id="net-status-dot" class="status-dot pulse-slow" style="background-color: #16A34A; color: #16A34A;"></span>
+              <span id="net-status-text">STABLE</span>
+            </div>
+          </div>
+          <div class="space-y-1.5 py-0.5 font-mono text-xs">
+            <div class="flex justify-between items-center">
+              <span class="text-[#888886]">Inbound (Down):</span>
+              <span class="font-bold text-[#0A0A0A]" id="net-rx-val">0.0 KB/s</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-[#888886]">Outbound (Up):</span>
+              <span class="font-bold text-[#0A0A0A]" id="net-tx-val">0.0 KB/s</span>
+            </div>
+          </div>
+          <!-- BTOP Peak & Cumulative Transfer Stats -->
+          <div class="pt-1.5 border-t border-[#E5E5E3] space-y-1 text-[10px] font-mono text-[#888886]">
+            <div class="flex justify-between items-center">
+              <span>Top Peak:</span>
+              <span class="text-[#0A0A0A] font-bold" id="net-peak-val">↓ 0.0 | ↑ 0.0 KB/s</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span>Total Vol:</span>
+              <span class="text-[#0A0A0A] font-bold" id="net-total-val">↓ 0.0 | ↑ 0.0 GB</span>
+            </div>
+          </div>
+          <div class="text-[11px] text-[#888886] font-mono border-t border-[#E5E5E3] pt-1 flex justify-between items-center">
+            <span>RTT Latency:</span>
+            <span id="rtt-latency-text" class="text-[#16A34A] font-bold">— ms</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION 1.2: TELEMETRY TREND WAVEFORMS (MOVED UP) -->
+    <section id="section-trends" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-sm font-bold text-[#0A0A0A] flex items-center gap-2">
+              <span>Telemetry Trends</span>
+              <span class="badge badge-neutral font-mono text-[10px]">2.0s CYCLE</span>
+            </h2>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 font-mono text-xs">
+          <span class="status-dot status-active"></span>
+          <span class="text-[#888886]">Buffer:</span>
+          <span id="trend-buffer-count" class="px-2 py-0.5 rounded bg-[#F4F4F2] text-[#0A0A0A] font-bold border border-[#E5E5E3]">30 Pts</span>
+        </div>
+      </div>
+
+      <!-- 4-GRID TELEMETRY CHARTS -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        
+        <!-- CHART 1: CPU -->
+        <div class="p-3.5 rounded-xl bg-white border border-[#E5E5E3] flex flex-col justify-between space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-xs text-[#0A0A0A] font-bold">CPU (%)</span>
+            <span id="chart-cpu-badge" class="badge badge-neutral font-mono text-[11px]">0.0%</span>
+          </div>
+          <div class="h-28 w-full relative">
+            <canvas id="chart-cpu-trend"></canvas>
+          </div>
+          <div class="flex justify-between text-[10px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-1">
+            <span>Range: 0% - 100%</span>
+            <span>Load</span>
+          </div>
+        </div>
+
+        <!-- CHART 2: RAM -->
+        <div class="p-3.5 rounded-xl bg-white border border-[#E5E5E3] flex flex-col justify-between space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-xs text-[#0A0A0A] font-bold">RAM (%)</span>
+            <span id="chart-ram-badge" class="badge badge-neutral font-mono text-[11px]">0.0%</span>
+          </div>
+          <div class="h-28 w-full relative">
+            <canvas id="chart-ram-trend"></canvas>
+          </div>
+          <div class="flex justify-between text-[10px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-1">
+            <span>Working Set</span>
+            <span id="chart-ram-gb-text">0.0 / 0.0 GB</span>
+          </div>
+        </div>
+
+        <!-- CHART 3: DISK -->
+        <div class="p-3.5 rounded-xl bg-white border border-[#E5E5E3] flex flex-col justify-between space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-xs text-[#0A0A0A] font-bold">Disk Activity (%)</span>
+            <span id="chart-disk-badge" class="badge badge-neutral font-mono text-[11px]">0.0%</span>
+          </div>
+          <div class="h-28 w-full relative">
+            <canvas id="chart-disk-trend"></canvas>
+          </div>
+          <div class="flex justify-between text-[10px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-1">
+            <span>Range: 0% - 100%</span>
+            <span id="chart-disk-speed-text">0.0 MB/s</span>
+          </div>
+        </div>
+
+        <!-- CHART 4: NETWORK -->
+        <div class="p-3.5 rounded-xl bg-white border border-[#E5E5E3] flex flex-col justify-between space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-xs text-[#0A0A0A] font-bold">Network (KB/s)</span>
+            <div class="flex items-center gap-1.5 font-mono text-[10px] text-[#888886]">
+              <span>↓ In</span>
+              <span>↑ Out</span>
+            </div>
+          </div>
+          <div class="h-28 w-full relative">
+            <canvas id="chart-net-trend"></canvas>
+          </div>
+          <div class="flex justify-between text-[10px] font-mono text-[#888886] border-t border-[#E5E5E3] pt-1">
+            <span>In: <b id="chart-net-rx-val" class="text-[#0A0A0A]">0.0</b></span>
+            <span>Out: <b id="chart-net-tx-val" class="text-[#0A0A0A]">0.0</b></span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION 1.5: STORAGE INFRASTRUCTURE (ENTERPRISE MULTI-DISK) -->
+    <section id="section-storage" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path>
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-sm font-bold text-[#0A0A0A] flex items-center gap-2">
+              <span>Storage Infrastructure & Drives</span>
+              <span class="badge badge-neutral text-[10px]">ENTERPRISE POOL</span>
+            </h2>
+            <div class="text-xs text-[#888886]">Multiple Physical Disks (NVMe, SATA SSD, HDD, RAID/SAS Controllers) & Volumes</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-[#888886]">Disks Detected:</span>
+          <span id="storage-disks-count-badge" class="px-2 py-0.5 rounded bg-[#F4F4F2] border border-[#E5E5E3] text-[#0A0A0A] font-bold">0 Disks</span>
+        </div>
+      </div>
+
+      <!-- Dynamic Multi-Storage Disks Cards Container -->
+      <div id="dynamic-storage-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Generated dynamically via siem.js -->
+      </div>
+    </section>
+
+    <!-- SECTION 2: SECURITY OPERATIONS CENTER -->
+    <section id="section-soc" class="card p-5 border border-[#E5E5E3] bg-white space-y-4 shadow-sm scroll-mt-6">
+      
+      <!-- SECTION TITLE HEADER -->
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E5E5E3] pb-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] flex items-center justify-center text-sm">
+            <svg class="w-4 h-4 text-[#0A0A0A] dark:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-sm font-bold text-[#0A0A0A] flex items-center gap-2">
+              <span>Security Operations Center (SOC)</span>
+              <span class="badge badge-neutral text-[10px]">LIVE TELEMETRY AUDIT</span>
+            </h2>
+            <div class="text-xs text-[#888886]">Audit Stream Event Log, Network Socket Active Connections, Process Sentinel & GPU Load</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 text-xs font-mono">
+          <span class="text-[#888886]">Audit Status:</span>
+          <span class="px-2 py-0.5 rounded bg-[#DCFCE7] border border-[#BBF7D0] text-[#16A34A] font-bold text-[11px] flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse"></span>
+            ACTIVE MONITORING
+          </span>
+        </div>
+      </div>
+
+      <!-- Tab Controls for SOC -->
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b border-[#E5E5E3] pb-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="soc-tab-processes" class="filter-pill active">
+            <span>Processes</span>
+            <span id="badge-proc-count" class="pill-count">0</span>
+          </button>
+          <button id="soc-tab-events" class="filter-pill">
+            <span>Event Stream</span>
+            <span id="badge-events-count" class="pill-count">0</span>
+          </button>
+          <button id="soc-tab-sockets" class="filter-pill">
+            <span>Network Sockets</span>
+            <span id="badge-sockets-count" class="pill-count">0</span>
+          </button>
+          <button id="soc-tab-gpu" class="filter-pill">
+            <span>GPU Adapter</span>
+            <span class="pill-count">Direct</span>
+          </button>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button id="copy-all-events-btn" class="btn btn-ghost btn-sm text-xs">
+            Salin Semua Log
+          </button>
+        </div>
+      </div>
+
+      <!-- VIEW 1: WINDOWS EVENT AUDIT STREAM -->
+      <div id="view-events-container" class="hidden space-y-3">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div class="relative flex-1">
+            <input type="text" id="siem-log-search" placeholder="Cari event ID, provider, deskripsi peringatan..." class="form-input text-xs pl-8 w-full py-1.5" />
+            <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#888886]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Event Filter Buttons -->
+        <div class="flex flex-wrap items-center gap-2 pt-1">
+          <button data-evfilter="ALL" class="siem-filter-btn filter-pill active">Semua (<span id="count-ev-all">0</span>)</button>
+          <button data-evfilter="Security" class="siem-filter-btn filter-pill">Security (<span id="count-ev-sec">0</span>)</button>
+          <button data-evfilter="System" class="siem-filter-btn filter-pill">System (<span id="count-ev-system">0</span>)</button>
+          <button data-evfilter="Application" class="siem-filter-btn filter-pill">Application (<span id="count-ev-app">0</span>)</button>
+          <button data-evfilter="WARNING_ERROR" class="siem-filter-btn filter-pill">Warning/Error (<span id="count-ev-warn">0</span>)</button>
+        </div>
+
+        <div class="table-card max-h-[480px] overflow-y-auto overflow-x-auto">
+          <table class="w-full min-w-[780px]">
+            <thead class="sticky top-0 z-10">
+              <tr>
+                <th class="w-24 min-w-[90px]">Waktu</th>
+                <th class="w-20 min-w-[80px]">Severity</th>
+                <th class="w-24 min-w-[90px]">Channel</th>
+                <th class="w-20 min-w-[75px]">Event ID</th>
+                <th class="w-40 min-w-[140px]">Provider / Sumber</th>
+                <th class="min-w-[240px]">Message</th>
+                <th class="text-right w-24 min-w-[85px] table-sticky-action">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="events-table-body" class="font-mono text-xs">
+              <tr>
+                <td colspan="7" class="py-8 text-center text-[#888886] font-sans">
+                  Memuat stream Windows Event Log dari target...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- VIEW 2: ACTIVE NETWORK SOCKETS -->
+      <div id="view-sockets-container" class="hidden space-y-3">
+        <div class="table-card max-h-[480px] overflow-y-auto">
+          <table>
+            <thead class="sticky top-0 z-10">
+              <tr>
+                <th>Local Address</th>
+                <th>Local Port</th>
+                <th>Remote Address</th>
+                <th>Remote Port</th>
+                <th>State</th>
+                <th>PID</th>
+                <th class="text-right">Tipe</th>
+              </tr>
+            </thead>
+            <tbody id="sockets-table-body" class="font-mono text-xs">
+              <tr>
+                <td colspan="7" class="py-8 text-center text-[#888886] font-sans">
+                  Memuat socket jaringan dari target...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- VIEW 3: PROCESS SENTINEL -->
+      <div id="view-processes-container" class="space-y-4">
+        
+        <!-- OPEN WINDOWS SPOTLIGHT -->
+        <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm0 4h16M8 4v5"></path>
+              </svg>
+              <h3 class="text-xs font-bold uppercase tracking-wider text-[#0A0A0A]">Jendela Desktop Aktif</h3>
+            </div>
+            <span id="active-windows-count-badge" class="badge badge-neutral font-mono">0 Jendela</span>
+          </div>
+
+          <!-- Cards Grid for Open Windows (Scrollable) -->
+          <div id="open-windows-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[240px] overflow-y-auto pr-1">
+            <div class="p-3 rounded-lg bg-white border border-[#E5E5E3] text-xs text-[#888886] text-center py-4">
+              Memindai jendela desktop aktif pada target...
+            </div>
+          </div>
+        </div>
+
+        <!-- PROCESS SEARCH & VIEW CONTROLS -->
+        <div class="space-y-2.5">
+          <!-- SEARCH BAR -->
+          <div class="relative w-full">
+            <input type="text" id="proc-search-input" placeholder="Cari nama aplikasi, proses, PID, judul jendela, atau user..." class="form-input text-xs pl-8 pr-8 w-full py-2 font-sans" />
+            <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#888886]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+            <button id="proc-search-clear-btn" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-[#888886] hover:text-[#0A0A0A] text-base leading-none">&times;</button>
+          </div>
+
+          <!-- PROCESS FILTER & SORTING CONTROLS -->
+          <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="proc-filter-all" onclick="filterProcessType('ALL')" class="filter-pill active">
+                Semua (<span id="count-proc-all">0</span>)
+              </button>
+              <button id="proc-filter-gui" onclick="filterProcessType('GUI_ONLY')" class="filter-pill">
+                GUI Only (<span id="count-proc-gui">0</span>)
+              </button>
+              <button id="proc-filter-heavy" onclick="filterProcessType('HEAVY')" class="filter-pill">
+                Heavy Load (<span id="count-proc-heavy">0</span>)
+              </button>
+            </div>
+            
+            <div class="flex flex-wrap items-center gap-3">
+              <!-- VIEW MODE TOGGLE: INDIVIDUAL (PIDS) VS HIERARCHICAL TREE VIEW -->
+              <div class="flex items-center gap-1 p-0.5 rounded-lg bg-[#F4F4F2] border border-[#E5E5E3] text-xs">
+                <button id="proc-view-flat" onclick="setProcessViewMode('FLAT')" class="px-2.5 py-1 rounded-md text-[11px] font-semibold transition bg-white text-[#0A0A0A] shadow-xs" title="Tampilkan setiap PID proses secara terpisah">
+                  Detail PID
+                </button>
+                <button id="proc-view-grouped" onclick="setProcessViewMode('GROUPED')" class="px-2.5 py-1 rounded-md text-[11px] font-semibold transition text-[#888886] hover:text-[#0A0A0A]" title="Hierarki pohon proses / grup aplikasi dengan sub-proses expand/collapse">
+                  Pohon / Tree View
+                </button>
+              </div>
+
+              <!-- TREE EXPAND / COLLAPSE ALL TOGGLES -->
+              <div id="tree-toggle-controls" class="hidden items-center gap-1 text-[11px] font-mono">
+                <button onclick="expandAllProcGroups()" class="px-2 py-0.5 rounded bg-[#F4F4F2] hover:bg-[#E5E5E3] text-[#0A0A0A] border border-[#E5E5E3] transition text-[10px] font-semibold" title="Buka semua hierarki cabang pohon sub-proses">
+                  + Buka Semua
+                </button>
+                <button onclick="collapseAllProcGroups()" class="px-2 py-0.5 rounded bg-[#F4F4F2] hover:bg-[#E5E5E3] text-[#0A0A0A] border border-[#E5E5E3] transition text-[10px] font-semibold" title="Tutup semua hierarki cabang pohon">
+                  - Tutup Semua
+                </button>
+              </div>
+
+              <div class="text-xs font-mono text-[#888886] flex items-center gap-2">
+                <span>Sorting:</span>
+                <span id="current-sort-badge" class="px-2 py-0.5 rounded bg-[#F4F4F2] text-[#0A0A0A] border border-[#E5E5E3] font-bold">CPU ▼</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROCESS TABLE WITH RESOURCE HEADERS -->
+        <div class="table-card max-h-[520px] overflow-y-auto overflow-x-auto">
+          <table class="w-full min-w-[920px]">
+            <thead class="sticky top-0 z-10 select-none">
+              <tr>
+                <th class="w-20 min-w-[80px]">PID</th>
+                <th class="w-44 min-w-[150px] cursor-pointer hover:text-[#0A0A0A] transition" onclick="sortProcessBy('name')">
+                  Aplikasi <span id="sort-ind-name" class="text-[10px]"></span>
+                </th>
+                <th class="min-w-[180px] max-w-xs">Jendela (Window Title)</th>
+                <th id="th-sort-cpu" class="w-24 min-w-[90px] cursor-pointer hover:text-[#0A0A0A] transition text-right bg-[#F4F4F2]" onclick="sortProcessBy('cpu')">
+                  CPU (%) <span id="sort-ind-cpu" class="text-[#0A0A0A] font-bold">▼</span>
+                </th>
+                <th id="th-sort-ram" class="w-28 min-w-[100px] cursor-pointer hover:text-[#0A0A0A] transition text-right" onclick="sortProcessBy('ram')">
+                  RAM (MB) <span id="sort-ind-ram" class="text-[10px]"></span>
+                </th>
+                <th id="th-sort-disk" class="w-24 min-w-[90px] cursor-pointer hover:text-[#0A0A0A] transition text-right" onclick="sortProcessBy('disk')">
+                  Disk I/O <span id="sort-ind-disk" class="text-[10px]"></span>
+                </th>
+                <th id="th-sort-net" class="w-28 min-w-[105px] cursor-pointer hover:text-[#0A0A0A] transition text-right whitespace-nowrap" onclick="sortProcessBy('net')">
+                  Network <span id="sort-ind-net" class="text-[10px]"></span>
+                </th>
+                <th class="w-24 min-w-[95px]">Owner</th>
+                <th class="w-20 min-w-[75px] text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="processes-table-body" class="font-mono text-xs">
+              <tr>
+                <td colspan="9" class="py-8 text-center text-[#888886] font-sans">
+                  Memuat daftar proses aktif dari target...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- VIEW 4: GPU ENGINE & VRAM LOAD -->
+      <div id="view-gpu-container" class="hidden space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+          <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3]">
+            <div class="text-[11px] font-bold text-[#888886] uppercase">GPU Model</div>
+            <div class="text-base font-bold text-[#0A0A0A] font-mono mt-1" id="gpu-model-val">—</div>
+            <div class="text-xs text-[#888886] mt-0.5" id="gpu-discrete-val">Direct Adapter</div>
+          </div>
+          <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3]">
+            <div class="text-[11px] font-bold text-[#888886] uppercase">Dedicated VRAM</div>
+            <div class="text-2xl font-bold text-[#0A0A0A] font-mono mt-1" id="gpu-vram-text">—</div>
+            <div class="w-full bg-[#E5E5E3] rounded-full h-1.5 mt-2 overflow-hidden">
+              <div id="gpu-vram-bar" class="bg-[#16A34A] h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3]">
+            <div class="text-[11px] font-bold text-[#888886] uppercase">3D Engine Load</div>
+            <div class="text-2xl font-bold text-[#0A0A0A] font-mono mt-1" id="gpu-load-text">—%</div>
+            <div class="text-xs text-[#888886] mt-1">Status: <span id="gpu-status-text" class="text-[#16A34A] font-bold">NORMAL</span></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <!-- MODAL: ADD / EDIT DEVICE PROFILE (DSS-V1 FORM STYLING) -->
+  <div id="device-profile-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+    <div class="card p-6 max-w-lg w-full shadow-lg space-y-4 animate-modal bg-white border border-[#E5E5E3]">
+      <div class="flex items-center justify-between border-b border-[#E5E5E3] pb-3">
+        <div class="flex items-center space-x-2">
+          <svg class="w-4 h-4 text-[#0A0A0A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+          </svg>
+          <h3 id="modal-profile-title" class="text-sm font-bold text-[#0A0A0A]">Profil Endpoint & Credential Vault</h3>
+        </div>
+        <button id="close-profile-modal-btn" class="text-[#888886] hover:text-[#0A0A0A] text-xl leading-none">&times;</button>
+      </div>
+
+      <form id="device-profile-form" class="space-y-3.5 text-xs">
+        <input type="hidden" id="modal-node-id" value="">
+
+        <div>
+          <label class="form-label">Nama Alias Endpoint:</label>
+          <input type="text" id="modal-node-name" placeholder="contoh: Laptop Acer Nitro / Server Database" class="form-input" required>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="form-label">Alamat IP / Host Target:</label>
+            <input type="text" id="modal-node-host" placeholder="172.16.4.205" class="form-input font-mono" required>
+          </div>
+          <div>
+            <label class="form-label">Port SSH:</label>
+            <input type="number" id="modal-node-port" placeholder="22" value="22" class="form-input font-mono" required>
+            <button type="button" id="btn-profile-view-setup" class="text-[11px] text-[#4A4A48] hover:text-[#0A0A0A] underline flex items-center gap-1 mt-1 transition">
+              <svg class="w-3.5 h-3.5 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+              <span>Script Setup SSH untuk Port Ini</span>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="form-label">Username SSH Windows/Linux:</label>
+          <input type="text" id="modal-node-user" placeholder="laptop-69pj06ep\acer" class="form-input font-mono" required>
+        </div>
+
+        <!-- STRICT PASSWORD VAULT FIELD -->
+        <div class="p-3 rounded-xl bg-[#F9F9F7] border border-[#E5E5E3] space-y-1.5">
+          <div class="flex items-center justify-between">
+            <label class="form-label mb-0">Password SSH:</label>
+            <span id="modal-pwd-status" class="badge badge-success text-[10px]">Tersimpan</span>
+          </div>
+          
+          <input 
+            type="password" 
+            id="modal-node-password" 
+            autocomplete="new-password"
+            placeholder="•••••••• (Tersimpan di Vault - isi jika ingin ganti)" 
+            class="form-input font-mono tracking-widest select-none">
+          <p class="text-[10px] text-[#888886] italic">
+            * Password tersimpan secara terenkripsi di server (Vault) dan tidak dapat dilihat dari antarmuka Web.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="form-label">Interval Polling (Detik):</label>
+            <input type="number" step="0.5" id="modal-node-interval" placeholder="2.0" value="2.0" class="form-input font-mono" required>
+          </div>
+          <div class="flex items-end pb-1">
+            <label class="flex items-center space-x-2 cursor-pointer text-[#4A4A48] font-semibold text-xs">
+              <input type="checkbox" id="modal-node-enabled" checked class="w-4 h-4 rounded text-[#0A0A0A] border-[#E5E5E3] focus:ring-0">
+              <span>Aktifkan Monitoring</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="modal-profile-feedback" class="hidden text-center text-xs font-semibold py-1.5 rounded"></div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-[#E5E5E3]">
+          <button type="button" id="delete-profile-btn" class="hidden btn btn-danger-ghost btn-sm">
+            Hapus Endpoint
+          </button>
+          <div class="flex items-center space-x-2 ml-auto">
+            <button type="button" id="cancel-profile-modal-btn" class="btn btn-ghost btn-sm">Batal</button>
+            <button type="submit" class="btn btn-black btn-sm">Simpan Profil</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dedicated SIEM Client Script -->
+  <script src="siem.js"></script>
+</body>
+</html>
