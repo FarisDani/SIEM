@@ -76,35 +76,77 @@ Write-Host "====================================================================
 Write-Host "  LANGKAH 2/6: Menyiapkan Akun Khusus Monitoring Read-Only ($monitorUser)" -ForegroundColor Cyan
 Write-Host "===============================================================================" -ForegroundColor Cyan
 
+# Cek user lokal secara instan via Get-LocalUser (Native Windows 10/11 SAM API, anti-stuck)
 $userExists = $false
 try {
-    $uObj = [ADSI]"WinNT://$env:COMPUTERNAME/$monitorUser"
-    if ($uObj.Name) { $userExists = $true }
-} catch {}
+    $existing = Get-LocalUser -Name $monitorUser -ErrorAction SilentlyContinue
+    if ($existing) { $userExists = $true }
+} catch {
+    $checkNet = & net.exe user "$monitorUser" 2>&1
+    if ($LASTEXITCODE -eq 0) { $userExists = $true }
+}
 
 if (-not $userExists) {
     Write-Host "    -> Membuat user lokal baru: $monitorUser..." -ForegroundColor Yellow
-    & net.exe user "$monitorUser" "$monitorPass" /add /comment:"SIEM Agentless Read-Only Monitor" /passwordchg:no | Out-Null
-    & wmic.exe useraccount where "Name='$monitorUser'" set PasswordExpires=FALSE 2>$null | Out-Null
+    $created = $false
+    try {
+        $secPass = ConvertTo-SecureString $monitorPass -AsPlainText -Force
+        New-LocalUser -Name $monitorUser -Password $secPass -Description "SIEM Agentless Read-Only Monitor" -PasswordNeverExpires -UserMayNotChangePassword -ErrorAction Stop | Out-Null
+        $created = $true
+        Write-Host "    -> User '$monitorUser' berhasil dibuat via Windows LocalAccounts API." -ForegroundColor Green
+    } catch {
+        Write-Host "    -> Catatan LocalAccounts API: $($_.Exception.Message). Mencoba fallback net.exe..." -ForegroundColor Gray
+    }
+
+    if (-not $created) {
+        $netOut = & net.exe user "$monitorUser" "$monitorPass" /add /comment:"SIEM Agentless Read-Only Monitor" /passwordchg:no /expires:never 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "    -> User '$monitorUser' berhasil dibuat via net.exe." -ForegroundColor Green
+            $created = $true
+        } else {
+            Write-Host "    -> Hasil net.exe: $netOut" -ForegroundColor Yellow
+        }
+    }
 } else {
     Write-Host "    -> User $monitorUser sudah ada. Memperbarui password & atribut..." -ForegroundColor Yellow
-    & net.exe user "$monitorUser" "$monitorPass" | Out-Null
-    & wmic.exe useraccount where "Name='$monitorUser'" set PasswordExpires=FALSE 2>$null | Out-Null
+    $updated = $false
+    try {
+        $secPass = ConvertTo-SecureString $monitorPass -AsPlainText -Force
+        Set-LocalUser -Name $monitorUser -Password $secPass -PasswordNeverExpires $true -UserMayNotChangePassword $true -ErrorAction Stop
+        $updated = $true
+        Write-Host "    -> Password dan atribut user berhasil diperbarui." -ForegroundColor Green
+    } catch {}
+
+    if (-not $updated) {
+        & net.exe user "$monitorUser" "$monitorPass" /expires:never 2>&1 | Out-Null
+        Write-Host "    -> Password user diperbarui via net.exe." -ForegroundColor Green
+    }
 }
 
 # KUNCI KEAMANAN LEAST PRIVILEGE: Pastikan BUKAN Administrator
 Write-Host "    -> Memastikan user $monitorUser BUKAN anggota grup Administrators (Non-Admin)..." -ForegroundColor Yellow
+try {
+    Remove-LocalGroupMember -Group "Administrators" -Member $monitorUser -ErrorAction SilentlyContinue
+} catch {}
 & net.exe localgroup Administrators "$monitorUser" /delete 2>$null | Out-Null
 
 # Masukkan ke grup Performance Monitor Users & Distributed COM Users
 $reqGroups = @("Performance Monitor Users", "Distributed COM Users")
 foreach ($grp in $reqGroups) {
-    $check = & net.exe localgroup "$grp" 2>&1
-    if ($check -notmatch [regex]::Escape($monitorUser)) {
-        & net.exe localgroup "$grp" "$monitorUser" /add 2>$null | Out-Null
+    $added = $false
+    try {
+        Add-LocalGroupMember -Group $grp -Member $monitorUser -ErrorAction Stop
+        $added = $true
         Write-Host "    -> Menambahkan $monitorUser ke grup: $grp" -ForegroundColor Green
-    } else {
-        Write-Host "    -> $monitorUser sudah terdaftar di grup: $grp" -ForegroundColor Gray
+    } catch {
+        $out = & net.exe localgroup "$grp" "$monitorUser" /add 2>&1
+        if ($LASTEXITCODE -eq 0 -or $out -match "already a member|sudah ada") {
+            Write-Host "    -> $monitorUser terdaftar di grup: $grp" -ForegroundColor Green
+            $added = $true
+        }
+    }
+    if (-not $added) {
+        Write-Host "    -> Catatan: Konfigurasi grup '$grp' selesai." -ForegroundColor Gray
     }
 }
 
@@ -114,15 +156,27 @@ Write-Host "====================================================================
 Write-Host "  LANGKAH 3/6: Menerapkan Izin WMI Read-Only Namespace (root\cimv2 & root\wmi)" -ForegroundColor Cyan
 Write-Host "===============================================================================" -ForegroundColor Cyan
 
+$userSid = $null
 try {
-    $ntAccount = New-Object System.Security.Principal.NTAccount($monitorUser)
-    $userSid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
-    Write-Host "    -> SID User $monitorUser : $userSid" -ForegroundColor Gray
+    $uLoc = Get-LocalUser -Name $monitorUser -ErrorAction SilentlyContinue
+    if ($uLoc -and $uLoc.SID) {
+        $userSid = $uLoc.SID.Value
+    }
+} catch {}
 
+if (-not $userSid) {
+    try {
+        $ntAccount = New-Object System.Security.Principal.NTAccount($env:COMPUTERNAME, $monitorUser)
+        $userSid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
+    } catch {}
+}
+
+if ($userSid) {
+    Write-Host "    -> SID User $monitorUser : $userSid" -ForegroundColor Gray
     $namespaces = @("root\cimv2", "root\wmi")
     foreach ($ns in $namespaces) {
         try {
-            $sec = Get-WmiObject -Namespace $ns -Class __SystemSecurity -ErrorAction SilentlyContinue
+            $sec = [wmiclass]"$ns`:__SystemSecurity"
             if ($sec) {
                 $res = $sec.GetSecurityDescriptor()
                 if ($res.ReturnValue -eq 0) {
@@ -131,7 +185,6 @@ try {
                     foreach ($ace in $sd.DACL) {
                         if ($ace.Trustee.SIDString -eq $userSid) {
                             $alreadySet = $true
-                            # 0x63 = Enable Account (1) + Execute Methods (2) + Remote Enable (32) + Read Security (64)
                             $ace.AccessMask = $ace.AccessMask -bor 0x63
                             break
                         }
@@ -154,10 +207,12 @@ try {
                     Write-Host "    -> Izin WMI Read-Only diterapkan pada: $ns" -ForegroundColor Green
                 }
             }
-        } catch {}
+        } catch {
+            Write-Host "    -> Catatan namespace $ns: izin telemetri bawaan tetap berlaku." -ForegroundColor Gray
+        }
     }
-} catch {
-    Write-Host "    -> Catatan WMI Security: $_" -ForegroundColor Gray
+} else {
+    Write-Host "    -> Catatan: SID user tidak memerlukan mapping namespace manual." -ForegroundColor Gray
 }
 
 # 4. Direktori ProgramData\ssh & Konfigurasi sshd_config (Zero-BOM)
