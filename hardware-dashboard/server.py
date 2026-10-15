@@ -298,30 +298,59 @@ try {
 } catch {}
 
 
-# 8. Fixed Partitions via DriveInfo
+# 8. Fixed Partitions mapped to DiskNumber
 $drives = @()
 try {
-    $driveObjs = [System.IO.DriveInfo]::GetDrives()
-    foreach ($d in $driveObjs) {
-        if ($d.DriveType -eq 'Fixed' -and $d.IsReady) {
-            $totD = [math]::Round($d.TotalSize / 1GB, 1)
-            $freeD = [math]::Round($d.AvailableFreeSpace / 1GB, 1)
+    $parts = Get-Partition -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter }
+    if ($parts) {
+        foreach ($p in $parts) {
+            $dl = "$($p.DriveLetter):"
+            $vol = Get-Volume -DriveLetter $p.DriveLetter -ErrorAction SilentlyContinue
+            $totD = [math]::Round($p.Size / 1GB, 1)
+            $freeD = if ($vol -and $vol.SizeRemaining) { [math]::Round($vol.SizeRemaining / 1GB, 1) } else { 0.0 }
             $usedD = [math]::Round($totD - $freeD, 1)
+            if ($usedD -lt 0) { $usedD = 0.0 }
             $pctD = if ($totD -gt 0) { [math]::Round(($usedD / $totD) * 100, 1) } else { 0 }
-            $label = if ($d.VolumeLabel) { $d.VolumeLabel } else { 'Local Disk' }
+            $label = if ($vol -and $vol.FileSystemLabel) { $vol.FileSystemLabel } else { 'Local Disk' }
+            $fs = if ($vol -and $vol.FileSystem) { $vol.FileSystem } else { 'NTFS' }
             $drives += [PSCustomObject]@{
-                drive = $d.Name.TrimEnd('\')
+                drive = $dl
                 label = $label
-                fileSystem = $d.DriveFormat
+                fileSystem = $fs
                 totalGb = $totD
                 freeGb = $freeD
                 usedGb = $usedD
                 usedPct = $pctD
-                diskIndex = 0
+                diskIndex = [int]$p.DiskNumber
             }
         }
     }
 } catch {}
+
+if ($drives.Count -eq 0) {
+    try {
+        $driveObjs = [System.IO.DriveInfo]::GetDrives()
+        foreach ($d in $driveObjs) {
+            if ($d.DriveType -eq 'Fixed' -and $d.IsReady) {
+                $totD = [math]::Round($d.TotalSize / 1GB, 1)
+                $freeD = [math]::Round($d.AvailableFreeSpace / 1GB, 1)
+                $usedD = [math]::Round($totD - $freeD, 1)
+                $pctD = if ($totD -gt 0) { [math]::Round(($usedD / $totD) * 100, 1) } else { 0 }
+                $label = if ($d.VolumeLabel) { $d.VolumeLabel } else { 'Local Disk' }
+                $drives += [PSCustomObject]@{
+                    drive = $d.Name.TrimEnd('\')
+                    label = $label
+                    fileSystem = $d.DriveFormat
+                    totalGb = $totD
+                    freeGb = $freeD
+                    usedGb = $usedD
+                    usedPct = $pctD
+                    diskIndex = 0
+                }
+            }
+        }
+    } catch {}
+}
 
 # 9. GPUs via Registry
 $gpus = @()
@@ -1101,28 +1130,33 @@ def parse_storage_data(raw_physical_disks, raw_partitions=None, smart_temps=None
             else:
                 iface = ifType or "Storage Drive"
 
-            # Auto-correct size if smaller than sum of partition sizes
-            sum_parts = sum(p["totalGb"] for p in partitions)
-            if sum_parts > 0 and size_gb < sum_parts:
-                size_gb = round(sum_parts, 1)
-
-            # Assign logical partitions
-            assigned = []
             target_disk_idx = d.get("index", idx)
-            matching_parts = [p for p in partitions if p.get("diskIndex") == target_disk_idx]
+
+            # Assign logical partitions:
+            # 1. Match by explicit diskIndex if available
+            matching_parts = [p for p in partitions if p.get("diskIndex") is not None and p.get("diskIndex") == target_disk_idx]
             if matching_parts:
                 assigned = matching_parts
             elif len(filtered_raw) == 1:
                 assigned = partitions
-            elif "NVME" in iface.upper() or size_gb >= 900:
-                assigned = [p for p in partitions if p.get("drive", "").upper() in ["C:", "D:"]]
-                if not assigned:
-                    assigned = partitions[:2]
             else:
-                already_assigned = sum([d_item.get("partitions", []) for d_item in disks], [])
-                assigned = [p for p in partitions if p not in already_assigned]
-                if not assigned and len(partitions) > 1:
-                    assigned = partitions[1:]
+                # Distribute unassigned partitions across disks without duplication
+                already_assigned_drives = {p["drive"] for d_item in disks for p in d_item.get("partitions", [])}
+                unassigned = [p for p in partitions if p["drive"] not in already_assigned_drives]
+                if unassigned:
+                    if idx == len(filtered_raw) - 1:
+                        assigned = unassigned
+                    else:
+                        non_c = [p for p in unassigned if not p["drive"].upper().startswith("C:")]
+                        assigned = non_c if non_c else unassigned[:1]
+                else:
+                    assigned = []
+
+            # Auto-correct size_gb only if 0 or missing from OS probe
+            if size_gb <= 0.0:
+                sum_assigned = sum(p["totalGb"] for p in assigned)
+                if sum_assigned > 0:
+                    size_gb = round(sum_assigned, 1)
 
             # Match SMART temp by fuzzy name matching
             disk_temp = None
@@ -2211,6 +2245,7 @@ def get_node_telemetry_snapshot(node_id):
         "ramSummary": ram_summary,
         "ramModules": ram_modules,
         "storageDisks": storage_disks,
+        "partitions": sum([d.get("partitions", []) for d in storage_disks], []),
         "systemSpecs": system_specs,
         "tasks": data.get("tasks_summary", {
             "totalProcs": len(top_processes),
