@@ -25,17 +25,23 @@ Write-Host "====================================================================
 Write-Host "  LANGKAH 2/6: Menghapus Akun Dedicated Monitoring 'siem-monitor'..." -ForegroundColor Cyan
 Write-Host "===============================================================================" -ForegroundColor Cyan
 
-$userExists = $false
+$deleted = $false
 try {
-    $uObj = [ADSI]"WinNT://$env:COMPUTERNAME/siem-monitor"
-    if ($uObj.Name) { $userExists = $true }
+    $existing = Get-LocalUser -Name "siem-monitor" -ErrorAction SilentlyContinue
+    if ($existing) {
+        Remove-LocalUser -Name "siem-monitor" -ErrorAction Stop
+        $deleted = $true
+        Write-Host "    -> Akun lokal 'siem-monitor' berhasil dihapus via Windows LocalAccounts API." -ForegroundColor Green
+    }
 } catch {}
 
-if ($userExists) {
-    & net.exe user "siem-monitor" /delete 2>$null | Out-Null
-    Write-Host "    -> Akun lokal 'siem-monitor' berhasil dihapus dari sistem." -ForegroundColor Green
-} else {
-    Write-Host "    -> Akun 'siem-monitor' tidak ditemukan atau sudah dibersihkan." -ForegroundColor Gray
+if (-not $deleted) {
+    $netOut = & net.exe user "siem-monitor" /delete 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "    -> Akun 'siem-monitor' berhasil dihapus via net.exe." -ForegroundColor Green
+    } else {
+        Write-Host "    -> Akun 'siem-monitor' sudah tidak ada atau telah dibersihkan." -ForegroundColor Gray
+    }
 }
 
 Write-Host ""
