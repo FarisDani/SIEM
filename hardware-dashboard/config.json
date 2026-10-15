@@ -88,10 +88,10 @@
     },
     {
       "id": "node_d6f41b59",
-      "name": "siem-monitor",
+      "name": "siem-monitor (Ubuntu Linux)",
       "type": "SSH_REMOTE",
-      "host": "10.0.2.15",
-      "port": 3000,
+      "host": "172.16.6.166",
+      "port": 22,
       "user": "siem-monitor",
       "password": "Siem@Indriati2026!",
       "key_path": "",
