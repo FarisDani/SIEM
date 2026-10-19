@@ -1,5 +1,5 @@
 {
-  "active_node_id": "node_96bb8bdc",
+  "active_node_id": "node_754cd227",
   "source_mode": "SSH_REMOTE",
   "nodes": [
     {
@@ -22,18 +22,6 @@
       "port": 0,
       "user": "SYSTEM",
       "password": "",
-      "key_path": "",
-      "poll_interval_seconds": 2.0,
-      "enabled": true
-    },
-    {
-      "id": "node_cdecef22",
-      "name": "pc diki",
-      "type": "SSH_REMOTE",
-      "host": "192.168.27.203",
-      "port": 2222,
-      "user": "siem-monitor",
-      "password": "Siem@Indriati2026!",
       "key_path": "",
       "poll_interval_seconds": 2.0,
       "enabled": true
@@ -63,18 +51,6 @@
       "enabled": true
     },
     {
-      "id": "node_58b309d7",
-      "name": "vm danir",
-      "type": "SSH_REMOTE",
-      "host": "100.110.35.89",
-      "port": 22,
-      "user": "siem-monitor",
-      "password": "Siem@Indriati2026!",
-      "key_path": "",
-      "poll_interval_seconds": 2.0,
-      "enabled": true
-    },
-    {
       "id": "node_96bb8bdc",
       "name": "acer new",
       "type": "SSH_REMOTE",
@@ -92,6 +68,30 @@
       "type": "SSH_REMOTE",
       "host": "172.16.6.166",
       "port": 22,
+      "user": "siem-monitor",
+      "password": "Siem@Indriati2026!",
+      "key_path": "",
+      "poll_interval_seconds": 1.0,
+      "enabled": true
+    },
+    {
+      "id": "node_e193e005",
+      "name": "pc diki",
+      "type": "SSH_REMOTE",
+      "host": "192.168.27.202",
+      "port": 3000,
+      "user": "siem-monitor",
+      "password": "Siem@Indriati2026!",
+      "key_path": "",
+      "poll_interval_seconds": 1.0,
+      "enabled": true
+    },
+    {
+      "id": "node_754cd227",
+      "name": "pc mb dera",
+      "type": "SSH_REMOTE",
+      "host": "192.168.27.201",
+      "port": 3000,
       "user": "siem-monitor",
       "password": "Siem@Indriati2026!",
       "key_path": "",
