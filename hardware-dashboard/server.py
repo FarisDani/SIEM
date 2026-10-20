@@ -396,7 +396,7 @@ try {
             if ($parts.Count -ge 5 -and ($parts[0] -eq 'TCP' -or $parts[0] -eq 'tcp')) {
                 if ($activeSockets.Count -lt 15) {
                     $local = $parts[1]; $remote = $parts[2]; $state = $parts[3]
-                    $pId = 0; [int]::TryParse($parts[4], [ref]$pId) | Out-Null
+                    $procId = 0; [int]::TryParse($parts[4], [ref]$procId) | Out-Null
                     $lAddr = $local; $lPort = 0
                     if ($local -match '^(.*):(\d+)$') { $lAddr = $matches[1]; $lPort = [int]$matches[2] }
                     $rAddr = $remote; $rPort = 0
@@ -407,7 +407,7 @@ try {
                         RemoteAddress = $rAddr
                         RemotePort = $rPort
                         State = $state
-                        PID = $pId
+                        PID = $procId
                     }
                 }
             }
@@ -447,19 +447,110 @@ try {
     }
 } catch {}
 
+$systemSessionProcs = @(
+    'svchost','dwm','csrss','lsass','smss','winlogon','fontdrvhost',
+    'searchhost','startmenuexperiencehost','textinputhost','securityhealthsystray',
+    'ctfmon','runtimebroker','backgroundtaskhost','shellexperiencehost',
+    'sihost','taskhostw','conhost','dllhost','spoolsv'
+)
+
+$friendlyAppNames = @{
+    'chrome' = 'Google Chrome'
+    'msedge' = 'Microsoft Edge'
+    'msedgewebview2' = 'Edge WebView2'
+    'firefox' = 'Mozilla Firefox'
+    'excel' = 'Microsoft Excel'
+    'winword' = 'Microsoft Word'
+    'powerpnt' = 'Microsoft PowerPoint'
+    'spotify' = 'Spotify Desktop'
+    'notepad' = 'Notepad'
+    'code' = 'Visual Studio Code'
+    'anydesk' = 'AnyDesk Remote'
+    'teamviewer' = 'TeamViewer'
+    'microsoft.notes' = 'Sticky Notes'
+    'hwinfo64' = 'HWiNFO64 Diagnostic'
+    'discord' = 'Discord'
+    'telegram' = 'Telegram'
+    'whatsapp' = 'WhatsApp Desktop'
+    'vlc' = 'VLC Media Player'
+    'acrobat' = 'Adobe Acrobat Reader'
+    'photoshop' = 'Adobe Photoshop'
+    'illustrator' = 'Adobe Illustrator'
+}
+
 $topProcs = @()
+$seenGui = @{}
+$addedPids = @{}
+
 if ($allProcsList) {
-    $sorted = $allProcsList | Sort-Object WorkingSet64 -Descending | Select-Object -First 30
-    foreach ($p in $sorted) {
-        $pId = [int]$p.Id
+    # 1. Prioritaskan aplikasi desktop interaktif pengguna di Session > 0 agar selalu muncul di Spotlight Open Windows
+    $userApps = $allProcsList | Where-Object { 
+        $_.SessionId -gt 0 -and 
+        $systemSessionProcs -notcontains $_.ProcessName.ToLower()
+    } | Sort-Object WorkingSet64 -Descending
+
+    foreach ($p in $userApps) {
+        $procId = [int]$p.Id
+        $pNameLower = $p.ProcessName.ToLower()
+        $wTitle = try { [string]$p.MainWindowTitle } catch { "" }
         $desc = try { $p.Description } catch { "" }
+        if (-not $desc -and $friendlyAppNames.ContainsKey($pNameLower)) { $desc = $friendlyAppNames[$pNameLower] }
+        if (-not $desc) { $desc = $p.ProcessName }
+
+        $hasWin = $false
+        $finalWinTitle = ""
+        if ($wTitle -and $wTitle.Trim() -ne "") {
+            $hasWin = $true
+            $finalWinTitle = $wTitle.Trim()
+        } elseif ($friendlyAppNames.ContainsKey($pNameLower) -or $pNameLower -eq 'explorer') {
+            $hasWin = $true
+            $finalWinTitle = if ($friendlyAppNames.ContainsKey($pNameLower)) { $friendlyAppNames[$pNameLower] } else { "File Explorer" }
+        }
+
+        # Simpan satu perwakilan utama per grup aplikasi GUI di spotlight
+        if ($hasWin -and -not $seenGui.ContainsKey($pNameLower)) {
+            $seenGui[$pNameLower] = $true
+            $addedPids[$procId] = $true
+            $cLoad = if ($cpuPercentMap.ContainsKey($procId)) { $cpuPercentMap[$procId] } else { 0.0 }
+            $stStr = ""; try { $stStr = $p.StartTime.ToString('HH:mm:ss') } catch {}
+            $topProcs += [PSCustomObject]@{
+                Id = $procId
+                PID = $procId
+                Name = $p.ProcessName
+                AppName = $desc
+                WindowTitle = $finalWinTitle
+                RAM_MB = [math]::Round($p.WorkingSet64 / 1MB, 1)
+                CPU = $cLoad
+                CPU_Pct = $cLoad
+                CPU_Sec = if ($p.CPU) { [math]::Round($p.CPU, 1) } else { 0.0 }
+                Disk_MB = 0.0
+                NetConns = 0
+                NetPorts = ""
+                User = ""
+                StartTime = $stStr
+                HasWindow = $true
+            }
+        }
+    }
+
+    # 2. Tambahkan proses-proses teratas lainnya berdasarkan konsumsi RAM hingga total 40 proses
+    $sortedRam = $allProcsList | Sort-Object WorkingSet64 -Descending
+    foreach ($p in $sortedRam) {
+        if ($topProcs.Count -ge 40) { break }
+        $procId = [int]$p.Id
+        if ($addedPids.ContainsKey($procId)) { continue }
+        $addedPids[$procId] = $true
+
+        $pNameLower = $p.ProcessName.ToLower()
+        $desc = try { $p.Description } catch { "" }
+        if (-not $desc -and $friendlyAppNames.ContainsKey($pNameLower)) { $desc = $friendlyAppNames[$pNameLower] }
         if (-not $desc) { $desc = $p.ProcessName }
         $wTitle = try { [string]$p.MainWindowTitle } catch { "" }
-        $cLoad = if ($cpuPercentMap.ContainsKey($pId)) { $cpuPercentMap[$pId] } else { 0.0 }
+        $cLoad = if ($cpuPercentMap.ContainsKey($procId)) { $cpuPercentMap[$procId] } else { 0.0 }
         $stStr = ""; try { $stStr = $p.StartTime.ToString('HH:mm:ss') } catch {}
         $topProcs += [PSCustomObject]@{
-            Id = $pId
-            PID = $pId
+            Id = $procId
+            PID = $procId
             Name = $p.ProcessName
             AppName = $desc
             WindowTitle = $wTitle
@@ -1566,7 +1657,12 @@ def poll_ssh_node_worker(node_id):
                             stdin2, stdout2, stderr2 = client.exec_command(win_exec_cmd, timeout=exec_inv_timeout)
                         inv_raw = stdout2.read().decode("utf-8", errors="ignore").strip()
                         if inv_raw:
-                            inv_data = json.loads(inv_raw)
+                            try:
+                                inv_data = json.loads(inv_raw)
+                                print(f"[{node_id}] Inventory JSON parsed successfully! TopProcesses count: {len(inv_data.get('TopProcesses', []))}", flush=True)
+                            except Exception as je:
+                                print(f"[{node_id}] Inventory JSON parse error: {je}. Raw: {inv_raw[:300]}", flush=True)
+                                inv_data = {}
                             raw_cpu = inv_data.get("CPU")
                             raw_os = inv_data.get("OS")
                             raw_board = inv_data.get("Board")
