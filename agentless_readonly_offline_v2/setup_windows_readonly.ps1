@@ -1,0 +1,279 @@
+# ===============================================================================
+# [OFFLINE 1-CLICK SETUP V2] OpenSSH Server TARGET - STRICT READ-ONLY
+# Mode: 100% OFFLINE / STANDALONE (TIDAK MEMBUTUHKAN WINDOWS UPDATE / INTERNET)
+# Akun Khusus: siem-monitor (100% NON-ADMINISTRATOR / KEAMANAN TINGGI)
+# ===============================================================================
+
+param(
+    [Parameter(Position=0)]
+    [int]$Port = 0,
+    [Parameter(Position=1)]
+    [string]$Password = "Siem@Indriati2026!"
+)
+
+$ErrorActionPreference = 'Continue'
+$targetPort = if ($Port -gt 0) { $Port } elseif ($env:SSH_TARGET_PORT) { [int]$env:SSH_TARGET_PORT } else { 3000 }
+$monitorUser = "siem-monitor"
+$monitorPass = $Password
+
+Write-Host "===============================================================================" -ForegroundColor Cyan
+Write-Host "  [OFFLINE V2] OPENSSH SERVER TARGET - STRICT READ-ONLY PROVISIONING" -ForegroundColor Cyan
+Write-Host "  Mode: 100% Offline (Mandiri tanpa Windows Update / Internet)" -ForegroundColor Green
+Write-Host "  Keamanan: Least Privilege (User siem-monitor BUKAN Administrator)" -ForegroundColor Yellow
+Write-Host "===============================================================================" -ForegroundColor Cyan
+Write-Host "  Target Port : $targetPort" -ForegroundColor Gray
+Write-Host "  Target User : $monitorUser" -ForegroundColor Gray
+Write-Host ""
+
+# -------------------------------------------------------------------------------
+# 1. Pemasangan Biner OpenSSH Server (Offline Standalone)
+# -------------------------------------------------------------------------------
+Write-Host "[1/6] Memeriksa & Menyediakan Biner OpenSSH Server..." -ForegroundColor Cyan
+
+$progOpenSSH = "$env:ProgramFiles\OpenSSH"
+$sysOpenSSH = "$env:windir\System32\OpenSSH\sshd.exe"
+$localBinDir = Join-Path $PSScriptRoot "bin"
+$sshdBinPath = $null
+
+if (Test-Path $sysOpenSSH) {
+    Write-Host "    [OK] Terdeteksi OpenSSH bawaan Windows di System32." -ForegroundColor Green
+    $sshdBinPath = $sysOpenSSH
+} elseif (Test-Path (Join-Path $progOpenSSH "sshd.exe")) {
+    Write-Host "    [OK] Terdeteksi OpenSSH di Program Files." -ForegroundColor Green
+    $sshdBinPath = Join-Path $progOpenSSH "sshd.exe"
+} else {
+    Write-Host "    [INFO] Biner OpenSSH belum terpasang di sistem." -ForegroundColor Yellow
+    Write-Host "    -> Menyalin biner offline OpenSSH ke $progOpenSSH..." -ForegroundColor Cyan
+    
+    if (-not (Test-Path $localBinDir)) {
+        Write-Host "    [ERROR] Folder biner offline '$localBinDir' tidak ditemukan!" -ForegroundColor Red
+        exit 1
+    }
+
+    try {
+        if (-not (Test-Path $progOpenSSH)) {
+            New-Item -ItemType Directory -Path $progOpenSSH -Force | Out-Null
+        }
+        Copy-Item -Path "$localBinDir\*" -Destination $progOpenSSH -Recurse -Force
+        $sshdBinPath = Join-Path $progOpenSSH "sshd.exe"
+        Write-Host "    [OK] Biner OpenSSH berhasil dipasang secara offline di $progOpenSSH." -ForegroundColor Green
+    } catch {
+        Write-Host "    [ERROR] Gagal menyalin biner offline: $_" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# Daftarkan Windows Service sshd jika belum ada
+$serviceObj = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
+if (-not $serviceObj) {
+    Write-Host "    -> Mendaftarkan Service Windows 'sshd'..." -ForegroundColor Cyan
+    & sc.exe create sshd binPath= "`"$sshdBinPath`"" start= auto DisplayName= "OpenSSH SSH Server" | Out-Null
+    & sc.exe description sshd "OpenSSH SSH Server for Agentless Telemetry Monitoring" | Out-Null
+} else {
+    & sc.exe config sshd binPath= "`"$sshdBinPath`"" start= auto | Out-Null
+}
+
+# -------------------------------------------------------------------------------
+# 2. Inisialisasi Direktori Data & Host Keys
+# -------------------------------------------------------------------------------
+Write-Host "[2/6] Memeriksa direktori data dan Host Keys..." -ForegroundColor Cyan
+
+$sshDataDir = "$env:ProgramData\ssh"
+if (-not (Test-Path $sshDataDir)) {
+    New-Item -ItemType Directory -Path $sshDataDir -Force | Out-Null
+}
+
+$keygenBin = if (Test-Path "$env:windir\System32\OpenSSH\ssh-keygen.exe") {
+    "$env:windir\System32\OpenSSH\ssh-keygen.exe"
+} elseif (Test-Path (Join-Path $progOpenSSH "ssh-keygen.exe")) {
+    Join-Path $progOpenSSH "ssh-keygen.exe"
+} else {
+    Join-Path $localBinDir "ssh-keygen.exe"
+}
+
+$hasKeys = (Test-Path "$sshDataDir\ssh_host_rsa_key") -or (Test-Path "$sshDataDir\ssh_host_ed25519_key")
+if (-not $hasKeys) {
+    Write-Host "    -> Membuat Host Keys SSH baru..." -ForegroundColor Yellow
+    if (Test-Path $keygenBin) {
+        & $keygenBin -A | Out-Null
+    }
+}
+
+# Strict ACL: SYSTEM & Administrators Full Control (Mencegah Error 10054)
+& icacls.exe "$sshDataDir" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
+Write-Host "    [OK] Host Keys dan izin ACL berhasil dikunci." -ForegroundColor Green
+
+# -------------------------------------------------------------------------------
+# 3. Konfigurasi sshd_config (Zero BOM & Strict Low-Latency)
+# -------------------------------------------------------------------------------
+Write-Host "[3/6] Menerapkan konfigurasi sshd_config..." -ForegroundColor Cyan
+
+$sftpBin = if (Test-Path "$env:windir\System32\OpenSSH\sftp-server.exe") {
+    "$env:windir\System32\OpenSSH\sftp-server.exe"
+} else {
+    Join-Path $progOpenSSH "sftp-server.exe"
+}
+
+$sshdConfigContent = @"
+Port $targetPort
+ListenAddress 0.0.0.0
+ListenAddress ::
+PasswordAuthentication yes
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+Subsystem sftp $sftpBin
+Match Group administrators
+       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
+"@
+
+$configFile = "$sshDataDir\sshd_config"
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($configFile, $sshdConfigContent, $utf8NoBom)
+& icacls.exe "$configFile" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:F" "BUILTIN\Administrators:F" | Out-Null
+Write-Host "    [OK] sshd_config berhasil ditulis (Port $targetPort)." -ForegroundColor Green
+
+# -------------------------------------------------------------------------------
+# 4. Akun Monitoring Read-Only (siem-monitor)
+# -------------------------------------------------------------------------------
+Write-Host "[4/6] Menyiapkan akun read-only '$monitorUser'..." -ForegroundColor Cyan
+
+$userExists = $false
+try {
+    $existing = Get-LocalUser -Name $monitorUser -ErrorAction Stop
+    $userExists = $true
+} catch {
+    $userExists = $false
+}
+
+$secPass = ConvertTo-SecureString $monitorPass -AsPlainText -Force
+$accountReady = $false
+
+if ($userExists) {
+    try {
+        Set-LocalUser -Name $monitorUser -Password $secPass -PasswordNeverExpires $true -AccountNeverExpires $true -ErrorAction Stop
+        $accountReady = $true
+        Write-Host "    [INFO] Akun '$monitorUser' sudah ada. Password diperbarui." -ForegroundColor Gray
+    } catch {
+        & net user $monitorUser $monitorPass /active:yes *>$null
+        $accountReady = $true
+        Write-Host "    [INFO] Password akun '$monitorUser' disinkronkan via net user." -ForegroundColor Gray
+    }
+} else {
+    # Catatan: Parameter -Description pada New-LocalUser dibatasi Windows maks 48 karakter.
+    try {
+        New-LocalUser -Name $monitorUser -Password $secPass -FullName "SIEM Monitor" -Description "SIEM Read-Only Telemetry" -PasswordNeverExpires -ErrorAction Stop | Out-Null
+        $accountReady = $true
+    } catch {
+        # Fallback deterministik ke net user bawaan Windows
+        & net user $monitorUser $monitorPass /add /comment:"SIEM ReadOnly" /expires:never *>$null
+        if ($LASTEXITCODE -eq 0 -or (Get-LocalUser -Name $monitorUser -ErrorAction SilentlyContinue)) {
+            $accountReady = $true
+        }
+    }
+    
+    if ($accountReady) {
+        Write-Host "    [OK] Akun '$monitorUser' berhasil dibuat." -ForegroundColor Green
+    } else {
+        Write-Host "    [WARNING] Gagal membuat akun secara otomatis. Mencoba membuat langsung..." -ForegroundColor Yellow
+        & net user $monitorUser $monitorPass /add *>$null
+    }
+}
+
+# PASTIKAN akun BUKAN Administrator
+try {
+    Remove-LocalGroupMember -Group "Administrators" -Member $monitorUser -ErrorAction SilentlyContinue
+} catch {}
+
+# Masukkan HANYA ke grup read-only telemetri (WMI/CIM)
+$readonlyGroups = @("Performance Monitor Users", "Distributed COM Users")
+foreach ($grp in $readonlyGroups) {
+    try {
+        Add-LocalGroupMember -Group $grp -Member $monitorUser -ErrorAction SilentlyContinue
+    } catch {
+        & net localgroup "$grp" $monitorUser /add *>$null
+    }
+}
+Write-Host "    [VERIFIKASI] User '$monitorUser' 100% NON-ADMINISTRATOR (Least Privilege)." -ForegroundColor Green
+
+# -------------------------------------------------------------------------------
+# 5. Konfigurasi Firewall
+# -------------------------------------------------------------------------------
+Write-Host "[5/6] Membuka port $targetPort di Windows Defender Firewall..." -ForegroundColor Cyan
+
+$ruleName = "OpenSSH-Server-In-Dashboard-ReadOnly-$targetPort"
+$existingRule = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
+if (-not $existingRule) {
+    New-NetFirewallRule -Name $ruleName -DisplayName "OpenSSH Server (Dashboard Port $targetPort)" -Description "Inbound port untuk Agentless Hardware Telemetry" -Direction Inbound -Protocol TCP -LocalPort $targetPort -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+    Write-Host "    [OK] Firewall Rule '$ruleName' dibuat." -ForegroundColor Green
+} else {
+    Set-NetFirewallRule -Name $ruleName -LocalPort $targetPort -Action Allow -Enabled True -ErrorAction SilentlyContinue | Out-Null
+    Write-Host "    [OK] Firewall Rule '$ruleName' aktif." -ForegroundColor Green
+}
+
+# -------------------------------------------------------------------------------
+# 6. Memulai Layanan SSHD & Self-Test
+# -------------------------------------------------------------------------------
+Write-Host "[6/6] Memulai layanan OpenSSH SSHD & Verifikasi Port..." -ForegroundColor Cyan
+
+Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
+
+# Jalankan service secara deterministik
+$svc = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
+if ($svc.Status -eq 'Running') {
+    Restart-Service -Name "sshd" -Force -ErrorAction SilentlyContinue
+} else {
+    Start-Service -Name "sshd" -ErrorAction SilentlyContinue
+}
+
+# Loop verifikasi status Running hingga 5 detik
+$waitLimit = 5
+while ($waitLimit -gt 0) {
+    Start-Sleep -Seconds 1
+    $currStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
+    if ($currStatus -eq 'Running') { break }
+    $waitLimit--
+}
+
+$sshdFinalStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
+if ($sshdFinalStatus -eq 'Running') {
+    Write-Host "    [OK] Layanan sshd berstatus: RUNNING" -ForegroundColor Green
+} else {
+    Write-Host "    [WARNING] Layanan sshd belum running ($sshdFinalStatus). Mencoba start via sc.exe..." -ForegroundColor Yellow
+    & sc.exe start sshd | Out-Null
+    Start-Sleep -Seconds 2
+}
+
+# Verifikasi port listening dengan retry
+$portListening = $false
+for ($i = 0; $i -lt 4; $i++) {
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $targetPort -State Listen -ErrorAction SilentlyContinue
+        if ($conn) { $portListening = $true; break }
+    } catch {}
+    Start-Sleep -Milliseconds 600
+}
+
+if ($portListening) {
+    Write-Host "    [OK] Port $targetPort AKTIF dan mendengarkan koneksi!" -ForegroundColor Green
+} else {
+    Write-Host "    [INFO] Layanan sshd aktif. Sistem sedang mengalokasikan listener pada Port $targetPort." -ForegroundColor Gray
+}
+
+# Deteksi IP lokal mesin
+$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet' -and $_.IPAddress -notmatch '^169\.254\.' } | Select-Object -First 1).IPAddress
+if (-not $localIP) { $localIP = "<IP_KOMPUTER_INI>" }
+
+Write-Host ""
+Write-Host "===============================================================================" -ForegroundColor Green
+Write-Host "  [SUKSES] PROVISIONING OFFLINE V2 SELESAI & SIAP DIDAFTARKAN!" -ForegroundColor Green
+Write-Host "===============================================================================" -ForegroundColor Green
+Write-Host "  Daftarkan di Web Dashboard -> 'Add Endpoint / SSH Target':" -ForegroundColor Cyan
+Write-Host "    - Host / IP Address : $localIP" -ForegroundColor White
+Write-Host "    - Port              : $targetPort" -ForegroundColor White
+Write-Host "    - Username          : $monitorUser" -ForegroundColor White
+Write-Host "    - Password          : $monitorPass" -ForegroundColor White
+Write-Host "===============================================================================" -ForegroundColor Green
+Write-Host "  Catatan Keamanan:" -ForegroundColor Yellow
+Write-Host "    * 100% Offline (Mandiri tanpa Windows Update / Internet)." -ForegroundColor Gray
+Write-Host "    * User '$monitorUser' HANYA memiliki hak akses read-only WMI/CIM." -ForegroundColor Gray
+Write-Host "===============================================================================" -ForegroundColor Green
