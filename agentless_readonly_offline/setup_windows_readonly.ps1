@@ -96,11 +96,18 @@ if (-not $hasKeys) {
     Write-Host "    -> Membuat Host Keys SSH baru..." -ForegroundColor Yellow
     if (Test-Path $keygenBin) {
         & $keygenBin -A *>$null
+        if (-not (Test-Path "$sshDataDir\ssh_host_ed25519_key")) {
+            & $keygenBin -t ed25519 -f "$sshDataDir\ssh_host_ed25519_key" -N '""' -q *>$null
+        }
+        if (-not (Test-Path "$sshDataDir\ssh_host_rsa_key")) {
+            & $keygenBin -t rsa -b 2048 -f "$sshDataDir\ssh_host_rsa_key" -N '""' -q *>$null
+        }
     }
 }
 
-# Strict ACL: SYSTEM & Administrators Full Control (Mencegah Error 10054)
-& icacls.exe "$sshDataDir" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" *>$null
+# Strict ACL: SYSTEM & Administrators Full Control (Mencegah Error 10054 & Bad Permissions)
+& icacls.exe "$sshDataDir" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" *>$null
+& icacls.exe "$sshDataDir\*" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:F" "BUILTIN\Administrators:F" "*S-1-5-18:F" "*S-1-5-32-544:F" *>$null
 Write-Host "    [OK] Host Keys dan izin ACL berhasil dikunci." -ForegroundColor Green
 
 # -------------------------------------------------------------------------------
