@@ -147,13 +147,37 @@ try {
 }
 
 $secPass = ConvertTo-SecureString $monitorPass -AsPlainText -Force
+$accountReady = $false
 
 if ($userExists) {
-    Set-LocalUser -Name $monitorUser -Password $secPass -PasswordNeverExpires $true -AccountNeverExpires $true -ErrorAction SilentlyContinue
-    Write-Host "    [INFO] Akun '$monitorUser' sudah ada. Password diperbarui." -ForegroundColor Gray
+    try {
+        Set-LocalUser -Name $monitorUser -Password $secPass -PasswordNeverExpires $true -AccountNeverExpires $true -ErrorAction Stop
+        $accountReady = $true
+        Write-Host "    [INFO] Akun '$monitorUser' sudah ada. Password diperbarui." -ForegroundColor Gray
+    } catch {
+        & net user $monitorUser $monitorPass /active:yes *>$null
+        $accountReady = $true
+        Write-Host "    [INFO] Password akun '$monitorUser' disinkronkan via net user." -ForegroundColor Gray
+    }
 } else {
-    New-LocalUser -Name $monitorUser -Password $secPass -FullName "SIEM Agentless Monitoring" -Description "Service Account Read-Only untuk Telemetri Dashboard" -PasswordNeverExpires -ErrorAction SilentlyContinue | Out-Null
-    Write-Host "    [OK] Akun '$monitorUser' berhasil dibuat." -ForegroundColor Green
+    # Catatan: Parameter -Description pada New-LocalUser dibatasi Windows maks 48 karakter
+    try {
+        New-LocalUser -Name $monitorUser -Password $secPass -FullName "SIEM Monitor" -Description "SIEM Read-Only Telemetry" -PasswordNeverExpires -ErrorAction Stop | Out-Null
+        $accountReady = $true
+    } catch {
+        # Fallback deterministik ke net user bawaan Windows jika New-LocalUser gagal
+        & net user $monitorUser $monitorPass /add /comment:"SIEM ReadOnly" /expires:never *>$null
+        if ($LASTEXITCODE -eq 0 -or (Get-LocalUser -Name $monitorUser -ErrorAction SilentlyContinue)) {
+            $accountReady = $true
+        }
+    }
+
+    if ($accountReady) {
+        Write-Host "    [OK] Akun '$monitorUser' berhasil dibuat." -ForegroundColor Green
+    } else {
+        Write-Host "    [WARNING] Gagal membuat akun secara otomatis. Mencoba membuat langsung..." -ForegroundColor Yellow
+        & net user $monitorUser $monitorPass /add *>$null
+    }
 }
 
 # PASTIKAN akun BUKAN Administrator
@@ -191,23 +215,41 @@ if (-not $existingRule) {
 Write-Host "[6/6] Memulai layanan OpenSSH SSHD & Verifikasi Port..." -ForegroundColor Cyan
 
 Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
-Restart-Service -Name "sshd" -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
 
-$sshdStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
-if ($sshdStatus -eq 'Running') {
-    Write-Host "    [OK] Layanan sshd berstatus: RUNNING" -ForegroundColor Green
+$svc = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
+if ($svc -and $svc.Status -eq 'Running') {
+    Restart-Service -Name "sshd" -Force -ErrorAction SilentlyContinue
 } else {
-    Write-Host "    [WARNING] Status layanan sshd: $sshdStatus. Mencoba memulai..." -ForegroundColor Yellow
     Start-Service -Name "sshd" -ErrorAction SilentlyContinue
 }
 
-# Verifikasi port listening
+# Polling tunggu service berstatus Running (hingga 5 detik)
+$waitLimit = 5
+while ($waitLimit -gt 0) {
+    Start-Sleep -Seconds 1
+    $currStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
+    if ($currStatus -eq 'Running') { break }
+    $waitLimit--
+}
+
+$sshdFinalStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
+if ($sshdFinalStatus -eq 'Running') {
+    Write-Host "    [OK] Layanan sshd berstatus: RUNNING" -ForegroundColor Green
+} else {
+    Write-Host "    [WARNING] Layanan sshd belum running ($sshdFinalStatus). Mencoba start via sc.exe..." -ForegroundColor Yellow
+    & sc.exe start sshd | Out-Null
+    Start-Sleep -Seconds 2
+}
+
+# Verifikasi port listening dengan retry
 $portListening = $false
-try {
-    $conn = Get-NetTCPConnection -LocalPort $targetPort -State Listen -ErrorAction SilentlyContinue
-    if ($conn) { $portListening = $true }
-} catch {}
+for ($i = 0; $i -lt 4; $i++) {
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $targetPort -State Listen -ErrorAction SilentlyContinue
+        if ($conn) { $portListening = $true; break }
+    } catch {}
+    Start-Sleep -Milliseconds 600
+}
 
 if ($portListening) {
     Write-Host "    [OK] Port $targetPort AKTIF dan siap menerima koneksi!" -ForegroundColor Green
