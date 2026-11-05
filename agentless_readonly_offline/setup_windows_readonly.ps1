@@ -296,16 +296,44 @@ if ($portListening) {
     Write-Host "    [INFO] Layanan aktif. Port $targetPort sedang disiapkan oleh Windows." -ForegroundColor Gray
 }
 
-# Deteksi IP lokal
-$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet' -and $_.IPAddress -notmatch '^169\.254\.' } | Select-Object -First 1).IPAddress
-if (-not $localIP) { $localIP = "<IP_KOMPUTER_INI>" }
+# Deteksi IP lokal aktif (prioritaskan interface yang memiliki default gateway / rute aktif seperti Wi-Fi)
+$activeIPs = @()
+try {
+    # Ambil interface dengan rute default IPv4 aktif (koneksi aktif yang tersambung ke jaringan)
+    $activeRoute = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1
+    if ($activeRoute) {
+        $primaryIP = (Get-NetIPAddress -InterfaceIndex $activeRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1).IPAddress
+        if ($primaryIP) { $activeIPs += $primaryIP }
+    }
+    
+    # Ambil semua IPv4 valid lainnya (Wi-Fi, Ethernet, LAN)
+    $allIPs = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | 
+        Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet' -and $_.IPAddress -notmatch '^169\.254\.' }
+    foreach ($item in $allIPs) {
+        if ($activeIPs -notcontains $item.IPAddress) {
+            $activeIPs += $item.IPAddress
+        }
+    }
+} catch {}
+
+$primaryDisplayIP = if ($activeIPs.Count -gt 0) { $activeIPs[0] } else { "<IP_KOMPUTER_INI>" }
 
 Write-Host ""
 Write-Host "===============================================================================" -ForegroundColor Green
 Write-Host "  [SUKSES] PROVISIONING OFFLINE SELESAI & SIAP DIDAFTARKAN!" -ForegroundColor Green
 Write-Host "===============================================================================" -ForegroundColor Green
+Write-Host "  IP Address yang terdeteksi di komputer ini:" -ForegroundColor Cyan
+if ($allIPs) {
+    foreach ($a in $allIPs) {
+        $marker = if ($a.IPAddress -eq $primaryDisplayIP) { " [Koneksi Aktif/Utama]" } else { "" }
+        Write-Host "    - [$($a.InterfaceAlias)] : $($a.IPAddress)$marker" -ForegroundColor White
+    }
+} else {
+    Write-Host "    - $primaryDisplayIP" -ForegroundColor White
+}
+Write-Host ""
 Write-Host "  Daftarkan di Web Dashboard -> 'Add Endpoint / SSH Target':" -ForegroundColor Cyan
-Write-Host "    - Host / IP Address : $localIP" -ForegroundColor White
+Write-Host "    - Host / IP Address : $primaryDisplayIP (atau pilih IP Wi-Fi di atas)" -ForegroundColor White
 Write-Host "    - Port              : $targetPort" -ForegroundColor White
 Write-Host "    - Username          : $monitorUser" -ForegroundColor White
 Write-Host "    - Password          : $monitorPass" -ForegroundColor White
