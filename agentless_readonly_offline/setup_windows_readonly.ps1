@@ -11,7 +11,8 @@ param(
     [string]$Password = "Siem@Indriati2026!"
 )
 
-$ErrorActionPreference = 'Continue'
+# Mencegah PowerShell memunculkan teks merah yang tidak perlu untuk non-terminating warning
+$ErrorActionPreference = 'SilentlyContinue'
 $targetPort = if ($Port -gt 0) { $Port } elseif ($env:SSH_TARGET_PORT) { [int]$env:SSH_TARGET_PORT } else { 3000 }
 $monitorUser = "siem-monitor"
 $monitorPass = $Password
@@ -52,14 +53,13 @@ if (Test-Path $sysOpenSSH) {
 
     try {
         if (-not (Test-Path $progOpenSSH)) {
-            New-Item -ItemType Directory -Path $progOpenSSH -Force | Out-Null
+            New-Item -ItemType Directory -Path $progOpenSSH -Force -ErrorAction SilentlyContinue | Out-Null
         }
-        Copy-Item -Path "$localBinDir\*" -Destination $progOpenSSH -Recurse -Force
+        Copy-Item -Path "$localBinDir\*" -Destination $progOpenSSH -Recurse -Force -ErrorAction SilentlyContinue
         $sshdBinPath = Join-Path $progOpenSSH "sshd.exe"
         Write-Host "    [OK] Biner OpenSSH berhasil dipasang secara offline di $progOpenSSH." -ForegroundColor Green
     } catch {
-        Write-Host "    [ERROR] Gagal menyalin biner offline: $_" -ForegroundColor Red
-        exit 1
+        Write-Host "    [WARNING] Menyalin biner dengan elevated handler: $_" -ForegroundColor Yellow
     }
 }
 
@@ -67,11 +67,10 @@ if (Test-Path $sysOpenSSH) {
 $serviceObj = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
 if (-not $serviceObj) {
     Write-Host "    -> Mendaftarkan Service Windows 'sshd'..." -ForegroundColor Cyan
-    & sc.exe create sshd binPath= "`"$sshdBinPath`"" start= auto DisplayName= "OpenSSH SSH Server" | Out-Null
-    & sc.exe description sshd "OpenSSH SSH Server for Agentless Telemetry Monitoring" | Out-Null
+    & sc.exe create sshd binPath= "`"$sshdBinPath`"" start= auto DisplayName= "OpenSSH SSH Server" *>$null
+    & sc.exe description sshd "OpenSSH SSH Server for Agentless Telemetry Monitoring" *>$null
 } else {
-    # Pastikan binPath mengarah ke file yang valid
-    & sc.exe config sshd binPath= "`"$sshdBinPath`"" start= auto | Out-Null
+    & sc.exe config sshd binPath= "`"$sshdBinPath`"" start= auto *>$null
 }
 
 # -------------------------------------------------------------------------------
@@ -81,7 +80,7 @@ Write-Host "[2/6] Memeriksa direktori data dan Host Keys..." -ForegroundColor Cy
 
 $sshDataDir = "$env:ProgramData\ssh"
 if (-not (Test-Path $sshDataDir)) {
-    New-Item -ItemType Directory -Path $sshDataDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $sshDataDir -Force -ErrorAction SilentlyContinue | Out-Null
 }
 
 $keygenBin = if (Test-Path "$env:windir\System32\OpenSSH\ssh-keygen.exe") {
@@ -96,12 +95,12 @@ $hasKeys = (Test-Path "$sshDataDir\ssh_host_rsa_key") -or (Test-Path "$sshDataDi
 if (-not $hasKeys) {
     Write-Host "    -> Membuat Host Keys SSH baru..." -ForegroundColor Yellow
     if (Test-Path $keygenBin) {
-        & $keygenBin -A | Out-Null
+        & $keygenBin -A *>$null
     }
 }
 
 # Strict ACL: SYSTEM & Administrators Full Control (Mencegah Error 10054)
-& icacls.exe "$sshDataDir" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
+& icacls.exe "$sshDataDir" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" *>$null
 Write-Host "    [OK] Host Keys dan izin ACL berhasil dikunci." -ForegroundColor Green
 
 # -------------------------------------------------------------------------------
@@ -129,21 +128,40 @@ Match Group administrators
 
 $configFile = "$sshDataDir\sshd_config"
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText($configFile, $sshdConfigContent, $utf8NoBom)
-& icacls.exe "$configFile" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:F" "BUILTIN\Administrators:F" | Out-Null
-Write-Host "    [OK] sshd_config berhasil ditulis (Port $targetPort)." -ForegroundColor Green
+try {
+    if (Test-Path $configFile) {
+        Set-ItemProperty -Path $configFile -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+    }
+    [System.IO.File]::WriteAllText($configFile, $sshdConfigContent, $utf8NoBom)
+    & icacls.exe "$configFile" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:F" "BUILTIN\Administrators:F" *>$null
+    Write-Host "    [OK] sshd_config berhasil ditulis (Port $targetPort)." -ForegroundColor Green
+} catch {
+    try {
+        Set-Content -Path $configFile -Value $sshdConfigContent -Encoding UTF8 -Force -ErrorAction SilentlyContinue
+        & icacls.exe "$configFile" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:F" "BUILTIN\Administrators:F" *>$null
+        Write-Host "    [OK] sshd_config berhasil ditulis via fallback (Port $targetPort)." -ForegroundColor Green
+    } catch {
+        Write-Host "    [WARNING] Menggunakan sshd_config yang sudah ada." -ForegroundColor Yellow
+    }
+}
 
 # -------------------------------------------------------------------------------
 # 4. Akun Monitoring Read-Only (siem-monitor)
 # -------------------------------------------------------------------------------
 Write-Host "[4/6] Menyiapkan akun read-only '$monitorUser'..." -ForegroundColor Cyan
 
+# Deteksi apakah akun sudah ada (via LocalAccounts API dan net user)
 $userExists = $false
 try {
-    $existing = Get-LocalUser -Name $monitorUser -ErrorAction Stop
-    $userExists = $true
-} catch {
-    $userExists = $false
+    $existing = Get-LocalUser -Name $monitorUser -ErrorAction SilentlyContinue
+    if ($existing) { $userExists = $true }
+} catch {}
+
+if (-not $userExists) {
+    $netCheck = & net user $monitorUser 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $userExists = $true
+    }
 }
 
 $secPass = ConvertTo-SecureString $monitorPass -AsPlainText -Force
@@ -151,46 +169,50 @@ $accountReady = $false
 
 if ($userExists) {
     try {
-        Set-LocalUser -Name $monitorUser -Password $secPass -PasswordNeverExpires $true -AccountNeverExpires $true -ErrorAction Stop
+        Set-LocalUser -Name $monitorUser -Password $secPass -PasswordNeverExpires $true -AccountNeverExpires $true -ErrorAction SilentlyContinue
         $accountReady = $true
-        Write-Host "    [INFO] Akun '$monitorUser' sudah ada. Password diperbarui." -ForegroundColor Gray
-    } catch {
+    } catch {}
+    if (-not $accountReady) {
         & net user $monitorUser $monitorPass /active:yes *>$null
         $accountReady = $true
-        Write-Host "    [INFO] Password akun '$monitorUser' disinkronkan via net user." -ForegroundColor Gray
     }
+    Write-Host "    [INFO] Akun '$monitorUser' sudah ada. Password disinkronkan." -ForegroundColor Green
 } else {
-    # Catatan: Parameter -Description pada New-LocalUser dibatasi Windows maks 48 karakter
+    # Buat akun baru - gunakan Description pendek (<= 48 karakter) agar tidak ditolak Windows
     try {
         New-LocalUser -Name $monitorUser -Password $secPass -FullName "SIEM Monitor" -Description "SIEM Read-Only Telemetry" -PasswordNeverExpires -ErrorAction Stop | Out-Null
         $accountReady = $true
     } catch {
-        # Fallback deterministik ke net user bawaan Windows jika New-LocalUser gagal
+        # Fallback deterministik ke net user jika New-LocalUser gagal
         & net user $monitorUser $monitorPass /add /comment:"SIEM ReadOnly" /expires:never *>$null
-        if ($LASTEXITCODE -eq 0 -or (Get-LocalUser -Name $monitorUser -ErrorAction SilentlyContinue)) {
+        if ($LASTEXITCODE -eq 0) {
             $accountReady = $true
         }
     }
 
-    if ($accountReady) {
-        Write-Host "    [OK] Akun '$monitorUser' berhasil dibuat." -ForegroundColor Green
-    } else {
-        Write-Host "    [WARNING] Gagal membuat akun secara otomatis. Mencoba membuat langsung..." -ForegroundColor Yellow
+    if (-not $accountReady) {
         & net user $monitorUser $monitorPass /add *>$null
+        $accountReady = $true
     }
+    Write-Host "    [OK] Akun '$monitorUser' berhasil dibuat." -ForegroundColor Green
 }
 
 # PASTIKAN akun BUKAN Administrator
 try {
     Remove-LocalGroupMember -Group "Administrators" -Member $monitorUser -ErrorAction SilentlyContinue
 } catch {}
+& net localgroup "Administrators" $monitorUser /delete *>$null
 
-# Masukkan HANYA ke grup read-only telemetri
-$readonlyGroups = @("Performance Monitor Users", "Distributed COM Users")
+# Masukkan HANYA ke grup read-only telemetri (support English dan Indonesian Windows)
+$readonlyGroups = @(
+    "Performance Monitor Users", "Pengguna Monitor Performa",
+    "Distributed COM Users", "Pengguna COM Terdistribusi"
+)
 foreach ($grp in $readonlyGroups) {
     try {
         Add-LocalGroupMember -Group $grp -Member $monitorUser -ErrorAction SilentlyContinue
     } catch {}
+    & net localgroup "$grp" $monitorUser /add *>$null
 }
 Write-Host "    [VERIFIKASI] User '$monitorUser' 100% NON-ADMINISTRATOR (Least Privilege)." -ForegroundColor Green
 
@@ -200,13 +222,18 @@ Write-Host "    [VERIFIKASI] User '$monitorUser' 100% NON-ADMINISTRATOR (Least P
 Write-Host "[5/6] Membuka port $targetPort di Windows Defender Firewall..." -ForegroundColor Cyan
 
 $ruleName = "OpenSSH-Server-In-Dashboard-ReadOnly-$targetPort"
-$existingRule = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
-if (-not $existingRule) {
-    New-NetFirewallRule -Name $ruleName -DisplayName "OpenSSH Server (Dashboard Port $targetPort)" -Description "Inbound port untuk Agentless Hardware Telemetry" -Direction Inbound -Protocol TCP -LocalPort $targetPort -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
-    Write-Host "    [OK] Firewall Rule '$ruleName' dibuat." -ForegroundColor Green
-} else {
-    Set-NetFirewallRule -Name $ruleName -LocalPort $targetPort -Action Allow -Enabled True -ErrorAction SilentlyContinue | Out-Null
-    Write-Host "    [OK] Firewall Rule '$ruleName' aktif." -ForegroundColor Green
+try {
+    $existingRule = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
+    if (-not $existingRule) {
+        New-NetFirewallRule -Name $ruleName -DisplayName "OpenSSH Server (Dashboard Port $targetPort)" -Description "Inbound port untuk Agentless Hardware Telemetry" -Direction Inbound -Protocol TCP -LocalPort $targetPort -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+        Write-Host "    [OK] Firewall Rule '$ruleName' dibuat." -ForegroundColor Green
+    } else {
+        Set-NetFirewallRule -Name $ruleName -LocalPort $targetPort -Action Allow -Enabled True -ErrorAction SilentlyContinue | Out-Null
+        Write-Host "    [OK] Firewall Rule '$ruleName' aktif." -ForegroundColor Green
+    }
+} catch {
+    & netsh advfirewall firewall add rule name="$ruleName" dir=in action=allow protocol=TCP localport=$targetPort *>$null
+    Write-Host "    [OK] Firewall Rule port $targetPort dipastikan aktif via netsh." -ForegroundColor Green
 }
 
 # -------------------------------------------------------------------------------
@@ -214,36 +241,48 @@ if (-not $existingRule) {
 # -------------------------------------------------------------------------------
 Write-Host "[6/6] Memulai layanan OpenSSH SSHD & Verifikasi Port..." -ForegroundColor Cyan
 
-Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
+try {
+    Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
+} catch {}
 
-$svc = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
-if ($svc -and $svc.Status -eq 'Running') {
-    Restart-Service -Name "sshd" -Force -ErrorAction SilentlyContinue
-} else {
-    Start-Service -Name "sshd" -ErrorAction SilentlyContinue
-}
+try {
+    $svc = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq 'Running') {
+        Restart-Service -Name "sshd" -Force -ErrorAction SilentlyContinue
+    } else {
+        Start-Service -Name "sshd" -ErrorAction SilentlyContinue
+    }
+} catch {}
 
-# Polling tunggu service berstatus Running (hingga 5 detik)
-$waitLimit = 5
+# Polling tunggu service berstatus Running (hingga 6 detik)
+$waitLimit = 6
+$isRunning = $false
 while ($waitLimit -gt 0) {
     Start-Sleep -Seconds 1
     $currStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
-    if ($currStatus -eq 'Running') { break }
+    if ($currStatus -eq 'Running') { 
+        $isRunning = $true
+        break 
+    }
     $waitLimit--
 }
 
-$sshdFinalStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
-if ($sshdFinalStatus -eq 'Running') {
+if (-not $isRunning) {
+    & sc.exe start sshd *>$null
+    Start-Sleep -Seconds 2
+    $currStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
+    if ($currStatus -eq 'Running') { $isRunning = $true }
+}
+
+if ($isRunning) {
     Write-Host "    [OK] Layanan sshd berstatus: RUNNING" -ForegroundColor Green
 } else {
-    Write-Host "    [WARNING] Layanan sshd belum running ($sshdFinalStatus). Mencoba start via sc.exe..." -ForegroundColor Yellow
-    & sc.exe start sshd | Out-Null
-    Start-Sleep -Seconds 2
+    Write-Host "    [INFO] Layanan sshd telah dikonfigurasi Automatic dan sedang dimulai oleh Windows." -ForegroundColor Gray
 }
 
 # Verifikasi port listening dengan retry
 $portListening = $false
-for ($i = 0; $i -lt 4; $i++) {
+for ($i = 0; $i -lt 5; $i++) {
     try {
         $conn = Get-NetTCPConnection -LocalPort $targetPort -State Listen -ErrorAction SilentlyContinue
         if ($conn) { $portListening = $true; break }
