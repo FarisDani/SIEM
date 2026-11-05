@@ -91,16 +91,15 @@ $keygenBin = if (Test-Path "$env:windir\System32\OpenSSH\ssh-keygen.exe") {
     Join-Path $localBinDir "ssh-keygen.exe"
 }
 
-$hasKeys = (Test-Path "$sshDataDir\ssh_host_rsa_key") -or (Test-Path "$sshDataDir\ssh_host_ed25519_key")
+$hasKeys = (Test-Path "$sshDataDir\ssh_host_rsa_key") -and (Test-Path "$sshDataDir\ssh_host_ed25519_key")
 if (-not $hasKeys) {
     Write-Host "    -> Membuat Host Keys SSH baru..." -ForegroundColor Yellow
     if (Test-Path $keygenBin) {
-        & $keygenBin -A *>$null
         if (-not (Test-Path "$sshDataDir\ssh_host_ed25519_key")) {
-            & $keygenBin -t ed25519 -f "$sshDataDir\ssh_host_ed25519_key" -N '""' -q *>$null
+            & $keygenBin -t ed25519 -f "$sshDataDir\ssh_host_ed25519_key" -N "" -q *>$null
         }
         if (-not (Test-Path "$sshDataDir\ssh_host_rsa_key")) {
-            & $keygenBin -t rsa -b 2048 -f "$sshDataDir\ssh_host_rsa_key" -N '""' -q *>$null
+            & $keygenBin -t rsa -b 2048 -f "$sshDataDir\ssh_host_rsa_key" -N "" -q *>$null
         }
     }
 }
@@ -115,12 +114,6 @@ Write-Host "    [OK] Host Keys dan izin ACL berhasil dikunci." -ForegroundColor 
 # -------------------------------------------------------------------------------
 Write-Host "[3/6] Menerapkan konfigurasi sshd_config..." -ForegroundColor Cyan
 
-$sftpBin = if (Test-Path "$env:windir\System32\OpenSSH\sftp-server.exe") {
-    "$env:windir\System32\OpenSSH\sftp-server.exe"
-} else {
-    Join-Path $progOpenSSH "sftp-server.exe"
-}
-
 $sshdConfigContent = @"
 Port $targetPort
 ListenAddress 0.0.0.0
@@ -128,7 +121,7 @@ ListenAddress ::
 PasswordAuthentication yes
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
-Subsystem sftp $sftpBin
+Subsystem sftp sftp-server.exe
 Match Group administrators
        AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
 "@
