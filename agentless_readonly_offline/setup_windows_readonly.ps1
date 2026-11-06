@@ -33,6 +33,7 @@ Write-Host "[1/6] Memeriksa & Menyediakan Biner OpenSSH Server..." -ForegroundCo
 
 $progOpenSSH = "$env:ProgramFiles\OpenSSH"
 $sysOpenSSH = "$env:windir\System32\OpenSSH\sshd.exe"
+$sshDataDir = "$env:ProgramData\ssh"
 $localBinDir = Join-Path $PSScriptRoot "bin"
 $sshdBinPath = $null
 
@@ -79,7 +80,6 @@ Remove-Item -Recurse -Force "$sshDataDir\logs" -ErrorAction SilentlyContinue
 # -------------------------------------------------------------------------------
 Write-Host "[2/6] Memeriksa direktori data dan Host Keys..." -ForegroundColor Cyan
 
-$sshDataDir = "$env:ProgramData\ssh"
 if (-not (Test-Path $sshDataDir)) {
     New-Item -ItemType Directory -Path $sshDataDir -Force -ErrorAction SilentlyContinue | Out-Null
 }
@@ -240,18 +240,13 @@ try {
 # -------------------------------------------------------------------------------
 Write-Host "[6/6] Memulai layanan OpenSSH SSHD & Verifikasi Port..." -ForegroundColor Cyan
 
-try {
-    Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
-} catch {}
+# Pastikan ImagePath di Registry ber-tanda kutip ganda dan service Automatic
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\sshd" -Name "ImagePath" -Value "`"$sshdBinPath`"" -ErrorAction SilentlyContinue
+Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
 
-try {
-    $svc = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
-    if ($svc -and $svc.Status -eq 'Running') {
-        Restart-Service -Name "sshd" -Force -ErrorAction SilentlyContinue
-    } else {
-        Start-Service -Name "sshd" -ErrorAction SilentlyContinue
-    }
-} catch {}
+# Mulai layanan OpenSSH
+& net.exe stop sshd *>$null
+& net.exe start sshd *>$null
 
 # Polling tunggu service berstatus Running (hingga 6 detik)
 $waitLimit = 6
@@ -267,6 +262,7 @@ while ($waitLimit -gt 0) {
 }
 
 if (-not $isRunning) {
+    try { Start-Service -Name "sshd" -ErrorAction SilentlyContinue } catch {}
     & sc.exe start sshd *>$null
     Start-Sleep -Seconds 2
     $currStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
