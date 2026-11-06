@@ -1,6 +1,7 @@
 #!/bin/bash
 # ===============================================================================
 # [1-CLICK UNINSTALL] OpenSSH Server TARGET (LINUX)
+# Memutuskan koneksi dashboard seketika & menghapus user secara bersih
 # ===============================================================================
 
 set -e
@@ -20,28 +21,54 @@ echo "==========================================================================
 echo "  [OFFLINE READY] UNINSTALL OPENSSH READ-ONLY MONITORING (LINUX)"
 echo "==============================================================================="
 
-# 1. Hapus User siem-monitor
-echo "[1/4] Menghapus user '$MONITOR_USER'..."
+# 1. Hapus User siem-monitor & Putus Sesi Seketika
+echo "[1/4] Memutuskan sesi aktif dan menghapus akun '$MONITOR_USER'..."
 if id "$MONITOR_USER" >/dev/null 2>&1; then
-    pkill -u "$MONITOR_USER" >/dev/null 2>&1 || true
+    # Kunci akun agar tidak bisa autentikasi lagi detik ini juga
+    passwd -l "$MONITOR_USER" >/dev/null 2>&1 || usermod -L "$MONITOR_USER" >/dev/null 2>&1 || true
+
+    # Hapus file kredensial SSH
+    rm -rf "/home/$MONITOR_USER/.ssh" >/dev/null 2>&1 || true
+
+    # Bunuh paksa seluruh proses dan koneksi SSH aktif detik ini
+    pkill -9 -u "$MONITOR_USER" >/dev/null 2>&1 || true
+    sleep 1
+
+    # Hapus user secara paksa (-f / force dan -r / remove home)
     if command -v userdel >/dev/null 2>&1; then
-        userdel -r "$MONITOR_USER" 2>/dev/null || userdel "$MONITOR_USER" 2>/dev/null || true
+        userdel -r -f "$MONITOR_USER" >/dev/null 2>&1 || userdel -f "$MONITOR_USER" >/dev/null 2>&1 || true
     elif command -v deluser >/dev/null 2>&1; then
-        deluser --remove-home "$MONITOR_USER" 2>/dev/null || deluser "$MONITOR_USER" 2>/dev/null || true
+        deluser --remove-home "$MONITOR_USER" >/dev/null 2>&1 || deluser "$MONITOR_USER" >/dev/null 2>&1 || true
     fi
-    echo "    [OK] User '$MONITOR_USER' berhasil dihapus."
+
+    # Bersihkan sisa home directory jika masih tertinggal
+    rm -rf "/home/$MONITOR_USER" >/dev/null 2>&1 || true
+
+    # Verifikasi apakah benar-benar terhapus
+    if id "$MONITOR_USER" >/dev/null 2>&1; then
+        pkill -9 -u "$MONITOR_USER" >/dev/null 2>&1 || true
+        userdel -f "$MONITOR_USER" >/dev/null 2>&1 || true
+    fi
+
+    if id "$MONITOR_USER" >/dev/null 2>&1; then
+        echo "    [GAGAL] User '$MONITOR_USER' masih belum terhapus dari sistem."
+        exit 1
+    else
+        echo "    [OK] User '$MONITOR_USER' dan koneksi dashboard telah diputus & dihapus."
+    fi
+else
+    echo "    [INFO] User '$MONITOR_USER' sudah tidak ada di sistem."
 fi
 
-# 2. Hapus Konfigurasi SSH
-echo "[2/4] Membersihkan konfigurasi drop-in OpenSSH..."
-CONFIG_FILE="/etc/ssh/sshd_config.d/99-siem-readonly.conf"
-if [ -f "$CONFIG_FILE" ]; then
-    rm -f "$CONFIG_FILE"
-    echo "    [OK] File konfigurasi $CONFIG_FILE dihapus."
-fi
+# 2. Hapus Drop-in Config SSH
+echo "[2/4] Membersihkan file konfigurasi OpenSSH..."
+rm -f /etc/ssh/sshd_config.d/*siem*.conf >/dev/null 2>&1 || true
+rm -f /etc/ssh/sshd_config.d/99-siem-readonly.conf >/dev/null 2>&1 || true
+rm -f /etc/ssh/sshd_config.d/siem_monitor.conf >/dev/null 2>&1 || true
+echo "    [OK] Konfigurasi monitoring OpenSSH dibersihkan."
 
 # 3. Hapus Firewall Rule
-echo "[3/4] Menghapus aturan firewall..."
+echo "[3/4] Menghapus aturan firewall port $TARGET_PORT..."
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
     ufw delete allow "$TARGET_PORT/tcp" >/dev/null 2>&1 || true
 elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
@@ -49,8 +76,8 @@ elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet fire
     firewall-cmd --reload >/dev/null 2>&1 || true
 fi
 
-# 4. Restart SSH Daemon
-echo "[4/4] Memuat ulang daemon OpenSSH..."
+# 4. Restart SSH Daemon agar semua sesi gantung & konfigurasi lama terlepas
+echo "[4/4] Merestart service OpenSSH..."
 if command -v systemctl >/dev/null 2>&1; then
     systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
 elif command -v service >/dev/null 2>&1; then
@@ -60,4 +87,5 @@ fi
 echo ""
 echo "==============================================================================="
 echo "  [SUKSES] UNINSTALL SELESAI"
+echo "  Koneksi SSH monitoring telah terputus seketika (status dashboard: DISCONNECTED)."
 echo "==============================================================================="

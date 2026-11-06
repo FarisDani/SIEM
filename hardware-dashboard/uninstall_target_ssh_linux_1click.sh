@@ -44,15 +44,31 @@ echo -e "${CYAN}================================================================
 TARGET_USER="siem-monitor"
 
 if id "$TARGET_USER" &>/dev/null; then
-    # Kill any active process owned by the user
-    pkill -u "$TARGET_USER" 2>/dev/null || true
-    sleep 1
-    # Force kill if still lingering
+    # Kunci akun seketika agar tidak bisa autentikasi lagi detik ini juga
+    passwd -l "$TARGET_USER" >/dev/null 2>&1 || usermod -L "$TARGET_USER" >/dev/null 2>&1 || true
+
+    # Hapus file kredensial SSH
+    rm -rf "/home/$TARGET_USER/.ssh" >/dev/null 2>&1 || true
+
+    # Kill any active process owned by the user (Force kill all sessions)
     pkill -9 -u "$TARGET_USER" 2>/dev/null || true
+    sleep 1
     
-    # Hapus user dan home directory
-    userdel -r "$TARGET_USER" 2>/dev/null || userdel -f "$TARGET_USER" 2>/dev/null || true
-    echo -e "    ${GREEN}-> Akun user '${TARGET_USER}' dan home directory berhasil dihapus.${NC}"
+    # Hapus user dan home directory secara paksa (-f)
+    userdel -r -f "$TARGET_USER" 2>/dev/null || userdel -f "$TARGET_USER" 2>/dev/null || deluser --remove-home "$TARGET_USER" 2>/dev/null || true
+    rm -rf "/home/$TARGET_USER" >/dev/null 2>&1 || true
+
+    # Verifikasi akhir
+    if id "$TARGET_USER" &>/dev/null; then
+        pkill -9 -u "$TARGET_USER" 2>/dev/null || true
+        userdel -f "$TARGET_USER" 2>/dev/null || true
+    fi
+
+    if id "$TARGET_USER" &>/dev/null; then
+        echo -e "    ${RED}-> [GAGAL] Akun user '${TARGET_USER}' masih tersangkut di sistem.${NC}"
+    else
+        echo -e "    ${GREEN}-> Akun user '${TARGET_USER}' dan home directory berhasil dihapus & sesi diputus.${NC}"
+    fi
 else
     echo -e "    ${GREEN}-> Akun user '${TARGET_USER}' memang sudah tidak ada.${NC}"
 fi
@@ -63,17 +79,18 @@ echo -e "${CYAN}  LANGKAH 2/4: Membersihkan Konfigurasi Khusus SSHD...          
 echo -e "${CYAN}===============================================================================${NC}"
 
 # Hapus konfigurasi drop-in jika ada
-if [ -f "/etc/ssh/sshd_config.d/siem_monitor.conf" ]; then
-    rm -f /etc/ssh/sshd_config.d/siem_monitor.conf
-    echo -e "    ${GREEN}-> File konfigurasi /etc/ssh/sshd_config.d/siem_monitor.conf dihapus.${NC}"
-fi
+rm -f /etc/ssh/sshd_config.d/*siem*.conf 2>/dev/null || true
+rm -f /etc/ssh/sshd_config.d/99-siem-readonly.conf 2>/dev/null || true
+rm -f /etc/ssh/sshd_config.d/siem_monitor.conf 2>/dev/null || true
+echo -e "    ${GREEN}-> File konfigurasi monitoring SSH berhasil dibersihkan.${NC}"
 
-# Validasi & reload SSHD
-if command -v sshd &>/dev/null; then
-    if sshd -t 2>/dev/null; then
-        systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
-        echo -e "    ${GREEN}-> Service SSHD berhasil di-reload dengan konfigurasi bersih.${NC}"
-    fi
+# Validasi & restart SSHD
+if command -v systemctl &>/dev/null; then
+    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+    echo -e "    ${GREEN}-> Service SSHD berhasil di-restart dengan konfigurasi bersih.${NC}"
+elif command -v service &>/dev/null; then
+    service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+    echo -e "    ${GREEN}-> Service SSH berhasil di-restart.${NC}"
 fi
 
 echo ""
