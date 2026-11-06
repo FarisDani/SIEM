@@ -1,7 +1,14 @@
-# ===============================================================================
+﻿# ===============================================================================
 # [OFFLINE 1-CLICK SETUP] OpenSSH Server TARGET - STRICT READ-ONLY
 # Mode: 100% OFFLINE / STANDALONE (TIDAK MEMBUTUHKAN WINDOWS UPDATE / INTERNET)
 # Akun Khusus: siem-monitor (100% NON-ADMINISTRATOR / KEAMANAN TINGGI)
+#
+# Catatan desain:
+# - Jika OpenSSH bawaan Windows (System32) sudah terpasang, dipakai apa adanya
+#   (service-nya didaftarkan resmi oleh Windows, sama seperti script lama).
+# - Jika belum ada, dipasang paket portable resmi Win32-OpenSSH dari folder 'bin'
+#   dan service didaftarkan memakai install-sshd.ps1 resmi (privileges + ETW log).
+# - Script ini aman dijalankan ulang: sekaligus membersihkan sisa konfigurasi lama.
 # ===============================================================================
 
 param(
@@ -26,54 +33,96 @@ Write-Host "  Target Port : $targetPort" -ForegroundColor Gray
 Write-Host "  Target User : $monitorUser" -ForegroundColor Gray
 Write-Host ""
 
-# -------------------------------------------------------------------------------
-# 1. Pemasangan Biner OpenSSH Server (Offline Standalone)
-# -------------------------------------------------------------------------------
-Write-Host "[1/6] Memeriksa & Menyediakan Biner OpenSSH Server..." -ForegroundColor Cyan
-
 $progOpenSSH = "$env:ProgramFiles\OpenSSH"
-$sysOpenSSH = "$env:windir\System32\OpenSSH\sshd.exe"
+$sysOpenSSHDir = "$env:windir\System32\OpenSSH"
 $sshDataDir = "$env:ProgramData\ssh"
 $localBinDir = Join-Path $PSScriptRoot "bin"
 $sshdBinPath = $null
 
-if (Test-Path $sysOpenSSH) {
-    Write-Host "    [OK] Terdeteksi OpenSSH bawaan Windows di System32." -ForegroundColor Green
-    $sshdBinPath = $sysOpenSSH
-} elseif (Test-Path (Join-Path $progOpenSSH "sshd.exe")) {
-    Write-Host "    [OK] Terdeteksi OpenSSH di Program Files." -ForegroundColor Green
-    $sshdBinPath = Join-Path $progOpenSSH "sshd.exe"
+# Fungsi: kunci ACL C:\ProgramData\ssh -> HANYA SYSTEM & Administrators (owner: Administrators)
+# Sama dengan metode script lama yang terbukti berhasil. Menghapus izin tambahan lain.
+function Reset-SshDataAcl {
+    param([string]$Dir)
+    $sidSystem = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
+    $sidAdmin  = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+    try {
+        $dacl = New-Object System.Security.AccessControl.DirectorySecurity
+        $dacl.SetOwner($sidAdmin)
+        $dacl.SetAccessRuleProtection($true, $false)
+        $dacl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sidSystem, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+        $dacl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sidAdmin, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+        Set-Acl -Path $Dir -AclObject $dacl
+    } catch {}
+    Get-ChildItem -Path $Dir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            if ($_.PSIsContainer) {
+                $acl = New-Object System.Security.AccessControl.DirectorySecurity
+                $acl.SetOwner($sidAdmin)
+                $acl.SetAccessRuleProtection($true, $false)
+                $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sidSystem, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+                $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sidAdmin, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+            } else {
+                $acl = New-Object System.Security.AccessControl.FileSecurity
+                $acl.SetOwner($sidAdmin)
+                $acl.SetAccessRuleProtection($true, $false)
+                $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sidSystem, "FullControl", "Allow")))
+                $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sidAdmin, "FullControl", "Allow")))
+            }
+            Set-Acl -Path $_.FullName -AclObject $acl
+        } catch {}
+    }
+}
+
+# -------------------------------------------------------------------------------
+# 1. Pemasangan OpenSSH Server & Registrasi Service
+# -------------------------------------------------------------------------------
+Write-Host "[1/6] Memeriksa & Menyediakan OpenSSH Server..." -ForegroundColor Cyan
+
+# Hentikan service & sisa proses sshd (misal jendela 'sshd -d' yang masih terbuka dan memakai port)
+Stop-Service -Name "sshd" -Force -ErrorAction SilentlyContinue
+Get-Process -Name "sshd" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
+
+$svcImage = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\sshd" -Name ImagePath -ErrorAction SilentlyContinue).ImagePath
+$inboxRegistered = (Test-Path "$sysOpenSSHDir\sshd.exe") -and ($svcImage -match 'System32\\OpenSSH')
+
+if ($inboxRegistered) {
+    # OpenSSH bawaan Windows sudah terpasang & terdaftar resmi -> pakai apa adanya
+    $sshdBinPath = "$sysOpenSSHDir\sshd.exe"
+    Write-Host "    [OK] Memakai OpenSSH bawaan Windows (System32), service terdaftar resmi." -ForegroundColor Green
 } else {
-    Write-Host "    [INFO] Biner OpenSSH belum terpasang di sistem." -ForegroundColor Yellow
-    Write-Host "    -> Menyalin biner offline OpenSSH ke $progOpenSSH..." -ForegroundColor Cyan
-    
-    if (-not (Test-Path $localBinDir)) {
-        Write-Host "    [ERROR] Folder biner offline '$localBinDir' tidak ditemukan!" -ForegroundColor Red
+    if (-not (Test-Path (Join-Path $localBinDir "install-sshd.ps1"))) {
+        Write-Host "    [ERROR] Paket offline tidak lengkap: '$localBinDir\install-sshd.ps1' tidak ditemukan!" -ForegroundColor Red
         exit 1
     }
 
-    try {
-        if (-not (Test-Path $progOpenSSH)) {
-            New-Item -ItemType Directory -Path $progOpenSSH -Force -ErrorAction SilentlyContinue | Out-Null
-        }
-        Copy-Item -Path "$localBinDir\*" -Destination $progOpenSSH -Recurse -Force -ErrorAction SilentlyContinue
-        $sshdBinPath = Join-Path $progOpenSSH "sshd.exe"
-        Write-Host "    [OK] Biner OpenSSH berhasil dipasang secara offline di $progOpenSSH." -ForegroundColor Green
-    } catch {
-        Write-Host "    [WARNING] Menyalin biner dengan elevated handler: $_" -ForegroundColor Yellow
+    Write-Host "    -> Memasang paket portable resmi Win32-OpenSSH ke $progOpenSSH..." -ForegroundColor Cyan
+    if (-not (Test-Path $progOpenSSH)) {
+        New-Item -ItemType Directory -Path $progOpenSSH -Force | Out-Null
+    }
+    Copy-Item -Path "$localBinDir\*" -Destination $progOpenSSH -Recurse -Force -ErrorAction SilentlyContinue
+    $sshdBinPath = Join-Path $progOpenSSH "sshd.exe"
+
+    if (-not (Test-Path (Join-Path $progOpenSSH "libcrypto.dll"))) {
+        Write-Host "    [ERROR] Gagal menyalin biner OpenSSH ke $progOpenSSH (libcrypto.dll tidak ada)." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "    [OK] Biner OpenSSH terpasang di $progOpenSSH." -ForegroundColor Green
+
+    # Daftarkan ulang service sshd memakai installer resmi (hapus service lama yang rusak,
+    # buat ulang dengan privileges yang benar, daftarkan log ETW, perbaiki izin ProgramData\ssh)
+    Write-Host "    -> Mendaftarkan ulang service 'sshd' via install-sshd.ps1 resmi..." -ForegroundColor Cyan
+    $installOut = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& '$progOpenSSH\install-sshd.ps1' -Confirm:`$false" 2>&1 | Out-String
+    if (Get-Service -Name "sshd" -ErrorAction SilentlyContinue) {
+        Write-Host "    [OK] Service 'sshd' terdaftar ulang dengan benar." -ForegroundColor Green
+    } else {
+        Write-Host "    [ERROR] Registrasi service gagal. Pesan installer:" -ForegroundColor Red
+        Write-Host $installOut -ForegroundColor Gray
+        Write-Host "    (Jika tertulis 'marked for deletion', tutup jendela Services lalu reboot dan jalankan ulang.)" -ForegroundColor Yellow
+        exit 1
     }
 }
-
-# Daftarkan Windows Service sshd jika belum ada, atau perbaiki ImagePath dengan tanda kutip aman
-$serviceObj = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
-if (-not $serviceObj) {
-    Write-Host "    -> Mendaftarkan Service Windows 'sshd'..." -ForegroundColor Cyan
-    New-Service -Name "sshd" -BinaryPathName "`"$sshdBinPath`"" -DisplayName "OpenSSH SSH Server" -Description "OpenSSH SSH Server for Agentless Telemetry Monitoring" -StartupType Automatic -ErrorAction SilentlyContinue | Out-Null
-}
-# Pastikan path di registry ber-tanda kutip (mencegah System Error 1067 Unquoted Path)
-Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\sshd" -Name "ImagePath" -Value "`"$sshdBinPath`"" -ErrorAction SilentlyContinue
 Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$sshDataDir\logs" -ErrorAction SilentlyContinue
 
 # -------------------------------------------------------------------------------
 # 2. Inisialisasi Direktori Data & Host Keys
@@ -84,34 +133,27 @@ if (-not (Test-Path $sshDataDir)) {
     New-Item -ItemType Directory -Path $sshDataDir -Force -ErrorAction SilentlyContinue | Out-Null
 }
 
-$keygenBin = if (Test-Path "$env:windir\System32\OpenSSH\ssh-keygen.exe") {
-    "$env:windir\System32\OpenSSH\ssh-keygen.exe"
-} elseif (Test-Path (Join-Path $progOpenSSH "ssh-keygen.exe")) {
-    Join-Path $progOpenSSH "ssh-keygen.exe"
-} else {
-    Join-Path $localBinDir "ssh-keygen.exe"
-}
-
-$hasKeys = (Test-Path "$sshDataDir\ssh_host_rsa_key") -and (Test-Path "$sshDataDir\ssh_host_ed25519_key")
-if (-not $hasKeys) {
-    Write-Host "    -> Membuat Host Keys SSH baru..." -ForegroundColor Yellow
-    if (Test-Path $keygenBin) {
-        if (-not (Test-Path "$sshDataDir\ssh_host_ed25519_key")) {
-            & $keygenBin -t ed25519 -f "$sshDataDir\ssh_host_ed25519_key" -N "" -q *>$null
-        }
-        if (-not (Test-Path "$sshDataDir\ssh_host_rsa_key")) {
-            & $keygenBin -t rsa -b 2048 -f "$sshDataDir\ssh_host_rsa_key" -N "" -q *>$null
+$keygenBin = Join-Path ([System.IO.Path]::GetDirectoryName($sshdBinPath)) "ssh-keygen.exe"
+if (Test-Path $keygenBin) {
+    foreach ($kt in @(@{t='ed25519'; f='ssh_host_ed25519_key'; b=$null}, @{t='rsa'; f='ssh_host_rsa_key'; b='2048'})) {
+        $kf = Join-Path $sshDataDir $kt.f
+        if (-not (Test-Path $kf) -or (Get-Item $kf).Length -eq 0) {
+            Remove-Item "$kf*" -Force -ErrorAction SilentlyContinue
+            Write-Host "    -> Membuat host key $($kt.t)..." -ForegroundColor Yellow
+            if ($kt.b) {
+                & $keygenBin -t $kt.t -b $kt.b -f $kf -N '""' -q *>$null
+            } else {
+                & $keygenBin -t $kt.t -f $kf -N '""' -q *>$null
+            }
         }
     }
 }
 
-# Strict ACL: SYSTEM & Administrators Full Control (Mencegah Error 10054 & Bad Permissions)
-& icacls.exe "$sshDataDir" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" *>$null
-& icacls.exe "$sshDataDir\*" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:F" "BUILTIN\Administrators:F" "*S-1-5-18:F" "*S-1-5-32-544:F" *>$null
-Write-Host "    [OK] Host Keys dan izin ACL berhasil dikunci." -ForegroundColor Green
+Reset-SshDataAcl -Dir $sshDataDir
+Write-Host "    [OK] Host Keys siap & izin ACL dikunci (hanya SYSTEM + Administrators)." -ForegroundColor Green
 
 # -------------------------------------------------------------------------------
-# 3. Konfigurasi sshd_config (Zero BOM & Strict Low-Latency)
+# 3. Konfigurasi sshd_config (Zero BOM)
 # -------------------------------------------------------------------------------
 Write-Host "[3/6] Menerapkan konfigurasi sshd_config..." -ForegroundColor Cyan
 
@@ -132,16 +174,19 @@ try {
         Set-ItemProperty -Path $configFile -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
     }
     [System.IO.File]::WriteAllText($configFile, $sshdConfigContent, $utf8NoBom)
-    & icacls.exe "$configFile" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:F" "BUILTIN\Administrators:F" *>$null
     Write-Host "    [OK] sshd_config berhasil ditulis (Port $targetPort)." -ForegroundColor Green
 } catch {
-    try {
-        Set-Content -Path $configFile -Value $sshdConfigContent -Encoding UTF8 -Force -ErrorAction SilentlyContinue
-        & icacls.exe "$configFile" /inheritance:r /grant:r "NT AUTHORITY\SYSTEM:F" "BUILTIN\Administrators:F" *>$null
-        Write-Host "    [OK] sshd_config berhasil ditulis via fallback (Port $targetPort)." -ForegroundColor Green
-    } catch {
-        Write-Host "    [WARNING] Menggunakan sshd_config yang sudah ada." -ForegroundColor Yellow
-    }
+    Write-Host "    [WARNING] Gagal menulis sshd_config: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+Reset-SshDataAcl -Dir $sshDataDir
+
+# Validasi konfigurasi sebelum service dinyalakan
+$testOut = & $sshdBinPath -t 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "    [ERROR] Validasi sshd_config / host key gagal:" -ForegroundColor Red
+    Write-Host $testOut -ForegroundColor Gray
+} else {
+    Write-Host "    [OK] Validasi konfigurasi & host key: VALID." -ForegroundColor Green
 }
 
 # -------------------------------------------------------------------------------
@@ -235,61 +280,53 @@ try {
     Write-Host "    [OK] Firewall Rule port $targetPort dipastikan aktif via netsh." -ForegroundColor Green
 }
 
+
 # -------------------------------------------------------------------------------
 # 6. Memulai Layanan SSHD & Self-Test
 # -------------------------------------------------------------------------------
 Write-Host "[6/6] Memulai layanan OpenSSH SSHD & Verifikasi Port..." -ForegroundColor Cyan
 
-# Pastikan ImagePath di Registry ber-tanda kutip ganda dan service Automatic
-Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\sshd" -Name "ImagePath" -Value "`"$sshdBinPath`"" -ErrorAction SilentlyContinue
-Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
+Start-Service -Name "sshd" -ErrorAction SilentlyContinue
 
-# Mulai layanan OpenSSH
-& net.exe stop sshd *>$null
-& net.exe start sshd *>$null
-
-# Polling tunggu service berstatus Running (hingga 6 detik)
-$waitLimit = 6
+# Polling tunggu service Running & port listening (hingga 10 detik)
 $isRunning = $false
-while ($waitLimit -gt 0) {
-    Start-Sleep -Seconds 1
-    $currStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
-    if ($currStatus -eq 'Running') { 
-        $isRunning = $true
-        break 
-    }
-    $waitLimit--
-}
-
-if (-not $isRunning) {
-    try { Start-Service -Name "sshd" -ErrorAction SilentlyContinue } catch {}
-    & sc.exe start sshd *>$null
-    Start-Sleep -Seconds 2
-    $currStatus = (Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status
-    if ($currStatus -eq 'Running') { $isRunning = $true }
-}
-
-if ($isRunning) {
-    Write-Host "    [OK] Layanan sshd berstatus: RUNNING" -ForegroundColor Green
-} else {
-    Write-Host "    [INFO] Layanan sshd telah dikonfigurasi Automatic dan sedang dimulai oleh Windows." -ForegroundColor Gray
-}
-
-# Verifikasi port listening dengan retry
 $portListening = $false
-for ($i = 0; $i -lt 5; $i++) {
-    try {
-        $conn = Get-NetTCPConnection -LocalPort $targetPort -State Listen -ErrorAction SilentlyContinue
-        if ($conn) { $portListening = $true; break }
-    } catch {}
-    Start-Sleep -Milliseconds 600
+for ($i = 0; $i -lt 10; $i++) {
+    Start-Sleep -Seconds 1
+    $isRunning = ((Get-Service -Name "sshd" -ErrorAction SilentlyContinue).Status -eq 'Running')
+    $portListening = [bool](Get-NetTCPConnection -LocalPort $targetPort -State Listen -ErrorAction SilentlyContinue)
+    if ($isRunning -and $portListening) { break }
 }
 
-if ($portListening) {
-    Write-Host "    [OK] Port $targetPort AKTIF dan siap menerima koneksi!" -ForegroundColor Green
-} else {
-    Write-Host "    [INFO] Layanan aktif. Port $targetPort sedang disiapkan oleh Windows." -ForegroundColor Gray
+if (-not ($isRunning -and $portListening)) {
+    Write-Host ""
+    Write-Host "===============================================================================" -ForegroundColor Red
+    Write-Host "  [GAGAL] Service sshd tidak berjalan / port $targetPort tidak listening." -ForegroundColor Red
+    Write-Host "===============================================================================" -ForegroundColor Red
+    Write-Host "  Status service : $((Get-Service -Name 'sshd' -ErrorAction SilentlyContinue).Status)" -ForegroundColor Yellow
+    Write-Host "  Binary         : $sshdBinPath" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Uji konfigurasi (sshd -t):" -ForegroundColor Cyan
+    Write-Host (& $sshdBinPath -t 2>&1 | Out-String) -ForegroundColor Gray
+    Write-Host "  Log terakhir OpenSSH/Operational:" -ForegroundColor Cyan
+    try {
+        Get-WinEvent -LogName 'OpenSSH/Operational' -MaxEvents 5 -ErrorAction Stop |
+            ForEach-Object { Write-Host ("    [{0}] {1}" -f $_.TimeCreated, $_.Message) -ForegroundColor Gray }
+    } catch {
+        Write-Host "    (Log OpenSSH/Operational tidak tersedia)" -ForegroundColor Gray
+    }
+    $portOwner = Get-NetTCPConnection -LocalPort $targetPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($portOwner) {
+        $procName = (Get-Process -Id $portOwner.OwningProcess -ErrorAction SilentlyContinue).ProcessName
+        Write-Host "  [!] Port $targetPort sedang dipakai proses lain: $procName (PID $($portOwner.OwningProcess))" -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "  Kirimkan seluruh teks di atas ke admin SIEM untuk dianalisis." -ForegroundColor Yellow
+    Write-Host "===============================================================================" -ForegroundColor Red
+    exit 1
 }
+
+Write-Host "    [OK] Layanan sshd RUNNING (Automatic) dan port $targetPort LISTENING." -ForegroundColor Green
 
 # Deteksi IP lokal aktif (prioritaskan interface yang memiliki default gateway / rute aktif seperti Wi-Fi)
 $activeIPs = @()
