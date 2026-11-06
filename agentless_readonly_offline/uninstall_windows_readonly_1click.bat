@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-title [OFFLINE 1-CLICK] Uninstall SSH Target Windows (Remove siem-monitor)
+title [OFFLINE 1-CLICK] Uninstall SSH Target Windows (Remove Monitoring User)
 
 :: ===============================================================================
 :: Auto-Elevate to Administrator (UAC Prompt)
@@ -19,7 +19,15 @@ echo ===========================================================================
 echo   [OFFLINE 1-CLICK] UNINSTALL OPENSSH TARGET MONITORING (WINDOWS)
 echo ===============================================================================
 echo.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall_windows_readonly.ps1"
+set /p MONITOR_USER="Masukkan Username Monitoring yang ingin dihapus [Tekan ENTER untuk default siem-monitor]: "
+if "!MONITOR_USER!"=="" set MONITOR_USER=siem-monitor
+
+set /p TARGET_PORT="Masukkan Port SSH yang ingin dibersihkan [Tekan ENTER untuk default 3000]: "
+if "!TARGET_PORT!"=="" set TARGET_PORT=3000
+
+echo.
+echo Membersihkan user !MONITOR_USER! dan firewall port !TARGET_PORT!...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall_windows_readonly.ps1" -Username "!MONITOR_USER!" -Port !TARGET_PORT!
 
 echo.
 echo ===============================================================================

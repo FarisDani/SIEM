@@ -1,8 +1,8 @@
 #!/bin/bash
 # ===============================================================================
 # [1-CLICK SETUP OFFLINE] OpenSSH Server TARGET (LINUX) - STRICT READ-ONLY
-# Akun Khusus: siem-monitor (100% NON-ROOT / NON-SUDO / LEAST PRIVILEGE)
-# Latensi Rendah (UseDNS no) | Multi-Distro (Ubuntu/Debian/CentOS/RHEL/Alma/Rocky)
+# Mode Interaktif: Custom Port (default 3000), Custom User & Password
+# Keamanan: 100% NON-ROOT / NON-SUDO / LEAST PRIVILEGE
 # ===============================================================================
 
 set -e
@@ -16,16 +16,50 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo bash "$0" "$@"
 fi
 
-TARGET_PORT="${1:-${SSH_TARGET_PORT:-22}}"
-MONITOR_USER="siem-monitor"
-MONITOR_PASS="Siem@Indriati2026!"
+ARG_PORT="$1"
+ARG_USER="$2"
+ARG_PASS="$3"
 
 echo "==============================================================================="
 echo "  [OFFLINE READY] OPENSSH SERVER TARGET - STRICT READ-ONLY (LINUX)"
-echo "  Prinsip Keamanan: Least Privilege (User siem-monitor MURNI NON-ROOT & NON-SUDO)"
+echo "  Prinsip Keamanan: Least Privilege (User MURNI NON-ROOT & NON-SUDO)"
 echo "==============================================================================="
-echo "  Port SSH Target  : $TARGET_PORT"
-echo "  Username Monitor : $MONITOR_USER"
+echo ""
+
+# Input Konfigurasi Interaktif (atau fallback ke argumen/default jika non-interaktif)
+if [ -n "$ARG_PORT" ]; then
+    TARGET_PORT="$ARG_PORT"
+elif [ -t 0 ]; then
+    read -r -p "Masukkan Port SSH Target [Tekan ENTER untuk default 3000]: " INPUT_PORT
+    TARGET_PORT="${INPUT_PORT:-${SSH_TARGET_PORT:-3000}}"
+else
+    TARGET_PORT="${SSH_TARGET_PORT:-3000}"
+fi
+
+if [ -n "$ARG_USER" ]; then
+    MONITOR_USER="$ARG_USER"
+elif [ -t 0 ]; then
+    read -r -p "Masukkan Username Monitoring [Tekan ENTER untuk default siem-monitor]: " INPUT_USER
+    MONITOR_USER="${INPUT_USER:-${SSH_TARGET_USER:-siem-monitor}}"
+else
+    MONITOR_USER="${SSH_TARGET_USER:-siem-monitor}"
+fi
+
+if [ -n "$ARG_PASS" ]; then
+    MONITOR_PASS="$ARG_PASS"
+elif [ -t 0 ]; then
+    read -r -p "Masukkan Password Monitoring [Tekan ENTER untuk default Siem@Indriati2026!]: " INPUT_PASS
+    MONITOR_PASS="${INPUT_PASS:-${SSH_TARGET_PASSWORD:-Siem@Indriati2026!}}"
+else
+    MONITOR_PASS="${SSH_TARGET_PASSWORD:-Siem@Indriati2026!}"
+fi
+
+echo ""
+echo "==============================================================================="
+echo "  Ringkasan Pengaturan Target:"
+echo "    - Port SSH   : $TARGET_PORT"
+echo "    - Username   : $MONITOR_USER"
+echo "    - Password   : $MONITOR_PASS"
 echo "==============================================================================="
 echo ""
 
@@ -46,7 +80,7 @@ else
     echo "    [OK] openssh-server sudah terpasang."
 fi
 
-# 2. Buat Akun siem-monitor (MURNI NON-ROOT, TANPA SUDO)
+# 2. Buat Akun Monitoring (MURNI NON-ROOT, TANPA SUDO)
 echo "[2/6] Mengkonfigurasi akun lokal '$MONITOR_USER'..."
 if id "$MONITOR_USER" >/dev/null 2>&1; then
     echo "    [INFO] Akun '$MONITOR_USER' sudah ada. Memperbarui password..."
@@ -102,14 +136,14 @@ else
 fi
 
 # 4. Buka Port Firewall jika Aktif
-echo "[4/6] Menyesuaikan firewall..."
+echo "[4/6] Menyesuaikan firewall port $TARGET_PORT..."
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
     ufw allow "$TARGET_PORT/tcp" comment "SIEM Agentless SSH ReadOnly" >/dev/null 2>&1
-    echo "    [OK] UFW rule ditambahkan."
+    echo "    [OK] UFW rule port $TARGET_PORT ditambahkan."
 elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
     firewall-cmd --add-port="$TARGET_PORT/tcp" --permanent >/dev/null 2>&1
     firewall-cmd --reload >/dev/null 2>&1
-    echo "    [OK] Firewalld rule ditambahkan."
+    echo "    [OK] Firewalld rule port $TARGET_PORT ditambahkan."
 fi
 
 # 5. Restart dan Aktifkan Service SSHD
@@ -122,7 +156,7 @@ elif command -v service >/dev/null 2>&1; then
     service ssh restart 2>/dev/null || service sshd restart 2>/dev/null
 fi
 
-# 6. Self-Test
+# 6. Self-Test & Ringkasan Akhir
 echo "[6/6] Verifikasi port listening..."
 sleep 1
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -132,7 +166,7 @@ echo ""
 echo "==============================================================================="
 echo "  [SUKSES] INSTALASI SELESAI & SIAP DIDAFTARKAN KE DASHBOARD!"
 echo "==============================================================================="
-echo "  Masukkan data berikut ke form 'Add Endpoint / SSH Target':"
+echo "  Masukkan data berikut ke form 'Add Endpoint / SSH Target' di Dashboard:"
 echo "    - IP Address : $LOCAL_IP"
 echo "    - Port       : $TARGET_PORT"
 echo "    - Username   : $MONITOR_USER"

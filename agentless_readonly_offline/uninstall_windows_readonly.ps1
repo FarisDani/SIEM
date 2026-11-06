@@ -1,29 +1,40 @@
 # ===============================================================================
 # [OFFLINE 1-CLICK UNINSTALL] OpenSSH Server TARGET - REMOVE READ-ONLY MONITORING
-# Membersihkan akun siem-monitor, firewall rule, dan biner jika diinstal offline.
+# Membersihkan akun monitoring, firewall rule, dan biner jika diinstal offline.
 # ===============================================================================
 
+param(
+    [Parameter(Position=0)]
+    [string]$Username = "",
+    [Parameter(Position=1)]
+    [int]$Port = 0
+)
+
 $ErrorActionPreference = 'Continue'
+$targetUser = if ($Username -and $Username.Trim() -ne "") { $Username.Trim() } elseif ($env:SSH_TARGET_USER) { $env:SSH_TARGET_USER.Trim() } else { "siem-monitor" }
+$targetPort = if ($Port -gt 0) { $Port } elseif ($env:SSH_TARGET_PORT) { [int]$env:SSH_TARGET_PORT } else { 3000 }
 
 Write-Host "===============================================================================" -ForegroundColor Yellow
 Write-Host "  [OFFLINE] UNINSTALL OPENSSH READ-ONLY MONITORING (WINDOWS)" -ForegroundColor Yellow
-Write-Host "  Membersihkan akun 'siem-monitor' dan konfigurasi Firewall/SSH" -ForegroundColor Yellow
+Write-Host "  Membersihkan akun '$targetUser' dan konfigurasi Firewall/SSH" -ForegroundColor Yellow
 Write-Host "===============================================================================" -ForegroundColor Yellow
+Write-Host "  Target User : $targetUser" -ForegroundColor Gray
+Write-Host "  Target Port : $targetPort" -ForegroundColor Gray
 Write-Host ""
 
-# 1. Hapus User siem-monitor
-Write-Host "[1/4] Menghapus akun lokal 'siem-monitor'..." -ForegroundColor Cyan
-$existingUser = Get-LocalUser -Name "siem-monitor" -ErrorAction SilentlyContinue
+# 1. Hapus User Monitoring
+Write-Host "[1/4] Menghapus akun lokal '$targetUser'..." -ForegroundColor Cyan
+$existingUser = Get-LocalUser -Name $targetUser -ErrorAction SilentlyContinue
 if ($existingUser) {
     try {
-        Remove-LocalUser -Name "siem-monitor" -ErrorAction Stop
-        Write-Host "    [OK] Akun 'siem-monitor' berhasil dihapus dari sistem." -ForegroundColor Green
+        Remove-LocalUser -Name $targetUser -ErrorAction Stop
+        Write-Host "    [OK] Akun '$targetUser' berhasil dihapus dari sistem." -ForegroundColor Green
     } catch {
-        & net user "siem-monitor" /delete *>$null
-        Write-Host "    [OK] Akun 'siem-monitor' telah dihapus." -ForegroundColor Green
+        & net user "$targetUser" /delete *>$null
+        Write-Host "    [OK] Akun '$targetUser' telah dihapus." -ForegroundColor Green
     }
 } else {
-    Write-Host "    [INFO] Akun 'siem-monitor' tidak ditemukan." -ForegroundColor Gray
+    Write-Host "    [INFO] Akun '$targetUser' tidak ditemukan." -ForegroundColor Gray
 }
 
 # 2. Hapus Windows Firewall Rules
@@ -33,7 +44,7 @@ if ($rules) {
     $rules | Remove-NetFirewallRule -ErrorAction SilentlyContinue
     Write-Host "    [OK] Firewall rules dashboard berhasil dihapus." -ForegroundColor Green
 } else {
-    Get-NetFirewallRule | Where-Object { $_.DisplayName -like "*OpenSSH*Dashboard*" -or $_.DisplayName -like "*siem-monitor*" } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    Get-NetFirewallRule | Where-Object { $_.DisplayName -like "*OpenSSH*Dashboard*" -or $_.DisplayName -like "*$targetUser*" } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
     Write-Host "    [OK] Tidak ada rule firewall dashboard yang tersisa." -ForegroundColor Gray
 }
 
@@ -52,13 +63,13 @@ if ($sshdService) {
     }
 }
 
-# 4. Hapus Direktori Profil siem-monitor jika ada
+# 4. Hapus Direktori Profil akun jika ada
 Write-Host "[4/4] Membersihkan sisa file profil akun..." -ForegroundColor Cyan
-$profileDir = "C:\Users\siem-monitor"
+$profileDir = "C:\Users\$targetUser"
 if (Test-Path $profileDir) {
     try {
         Remove-Item -Path $profileDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "    [OK] Direktori profil user C:\Users\siem-monitor dibersihkan." -ForegroundColor Green
+        Write-Host "    [OK] Direktori profil user $profileDir dibersihkan." -ForegroundColor Green
     } catch {
         Write-Host "    [INFO] Direktori profil akan dibersihkan oleh sistem pada reboot." -ForegroundColor Gray
     }

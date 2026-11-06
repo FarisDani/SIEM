@@ -28,13 +28,17 @@ echo -e "${CYAN}================================================================
 echo ""
 
 # Konfigurasi Default
-TARGET_USER="siem-monitor"
+DEFAULT_USER="siem-monitor"
 DEFAULT_PASS="Siem@Indriati2026!"
-DEFAULT_PORT=22
+DEFAULT_PORT=3000
 
 # Input Port
-read -p "Masukkan Port SSH [Tekan ENTER untuk Port 22 default]: " INPUT_PORT
+read -p "Masukkan Port SSH [Tekan ENTER untuk Port 3000 default]: " INPUT_PORT
 SSH_PORT=${INPUT_PORT:-$DEFAULT_PORT}
+
+# Input Username
+read -p "Masukkan Username Monitoring [Tekan ENTER untuk default siem-monitor]: " INPUT_USER
+TARGET_USER=${INPUT_USER:-$DEFAULT_USER}
 
 # Input Password
 echo -e "Password standar monitoring: ${YELLOW}${DEFAULT_PASS}${NC}"

@@ -14,14 +14,41 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo bash "$0" "$@"
 fi
 
-TARGET_PORT="${1:-${SSH_TARGET_PORT:-22}}"
-MONITOR_USER="siem-monitor"
+ARG_PORT="$1"
+ARG_USER="$2"
 
 echo "==============================================================================="
 echo "  [OFFLINE READY] UNINSTALL OPENSSH READ-ONLY MONITORING (LINUX)"
 echo "==============================================================================="
+echo ""
 
-# 1. Hapus User siem-monitor & Putus Sesi Seketika
+if [ -n "$ARG_USER" ]; then
+    MONITOR_USER="$ARG_USER"
+elif [ -t 0 ]; then
+    read -r -p "Masukkan Username Monitoring yang ingin dihapus [Tekan ENTER untuk default siem-monitor]: " INPUT_USER
+    MONITOR_USER="${INPUT_USER:-${SSH_TARGET_USER:-siem-monitor}}"
+else
+    MONITOR_USER="${SSH_TARGET_USER:-siem-monitor}"
+fi
+
+if [ -n "$ARG_PORT" ]; then
+    TARGET_PORT="$ARG_PORT"
+elif [ -t 0 ]; then
+    read -r -p "Masukkan Port SSH yang ingin dibersihkan [Tekan ENTER untuk default 3000]: " INPUT_PORT
+    TARGET_PORT="${INPUT_PORT:-${SSH_TARGET_PORT:-3000}}"
+else
+    TARGET_PORT="${SSH_TARGET_PORT:-3000}"
+fi
+
+echo ""
+echo "==============================================================================="
+echo "  Target Uninstalasi:"
+echo "    - Username : $MONITOR_USER"
+echo "    - Port SSH : $TARGET_PORT"
+echo "==============================================================================="
+echo ""
+
+# 1. Hapus User & Putus Sesi Seketika
 echo "[1/4] Memutuskan sesi aktif dan menghapus akun '$MONITOR_USER'..."
 if id "$MONITOR_USER" >/dev/null 2>&1; then
     # Kunci akun agar tidak bisa autentikasi lagi detik ini juga

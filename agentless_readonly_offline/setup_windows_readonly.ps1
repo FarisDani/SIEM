@@ -1,4 +1,4 @@
-﻿# ===============================================================================
+# ===============================================================================
 # [OFFLINE 1-CLICK SETUP] OpenSSH Server TARGET - STRICT READ-ONLY
 # Mode: 100% OFFLINE / STANDALONE (TIDAK MEMBUTUHKAN WINDOWS UPDATE / INTERNET)
 # Akun Khusus: siem-monitor (100% NON-ADMINISTRATOR / KEAMANAN TINGGI)
@@ -15,22 +15,25 @@ param(
     [Parameter(Position=0)]
     [int]$Port = 0,
     [Parameter(Position=1)]
-    [string]$Password = "Siem@Indriati2026!"
+    [string]$Username = "",
+    [Parameter(Position=2)]
+    [string]$Password = ""
 )
 
 # Mencegah PowerShell memunculkan teks merah yang tidak perlu untuk non-terminating warning
 $ErrorActionPreference = 'SilentlyContinue'
 $targetPort = if ($Port -gt 0) { $Port } elseif ($env:SSH_TARGET_PORT) { [int]$env:SSH_TARGET_PORT } else { 3000 }
-$monitorUser = "siem-monitor"
-$monitorPass = $Password
+$monitorUser = if ($Username -and $Username.Trim() -ne "") { $Username.Trim() } elseif ($env:SSH_TARGET_USER) { $env:SSH_TARGET_USER.Trim() } else { "siem-monitor" }
+$monitorPass = if ($Password -and $Password.Trim() -ne "") { $Password.Trim() } elseif ($env:SSH_TARGET_PASSWORD) { $env:SSH_TARGET_PASSWORD.Trim() } else { "Siem@Indriati2026!" }
 
 Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host "  [OFFLINE] OPENSSH SERVER TARGET - STRICT READ-ONLY PROVISIONING" -ForegroundColor Cyan
 Write-Host "  Mode: 100% Offline (Mandiri tanpa Windows Update / Internet)" -ForegroundColor Green
-Write-Host "  Keamanan: Least Privilege (User siem-monitor BUKAN Administrator)" -ForegroundColor Yellow
+Write-Host "  Keamanan: Least Privilege (User $monitorUser BUKAN Administrator)" -ForegroundColor Yellow
 Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host "  Target Port : $targetPort" -ForegroundColor Gray
 Write-Host "  Target User : $monitorUser" -ForegroundColor Gray
+Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host ""
 
 $progOpenSSH = "$env:ProgramFiles\OpenSSH"
