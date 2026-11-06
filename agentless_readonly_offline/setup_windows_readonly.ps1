@@ -63,15 +63,16 @@ if (Test-Path $sysOpenSSH) {
     }
 }
 
-# Daftarkan Windows Service sshd jika belum ada
+# Daftarkan Windows Service sshd jika belum ada, atau perbaiki ImagePath dengan tanda kutip aman
 $serviceObj = Get-Service -Name "sshd" -ErrorAction SilentlyContinue
 if (-not $serviceObj) {
     Write-Host "    -> Mendaftarkan Service Windows 'sshd'..." -ForegroundColor Cyan
-    & sc.exe create sshd binPath= "`"$sshdBinPath`"" start= auto DisplayName= "OpenSSH SSH Server" *>$null
-    & sc.exe description sshd "OpenSSH SSH Server for Agentless Telemetry Monitoring" *>$null
-} else {
-    & sc.exe config sshd binPath= "`"$sshdBinPath`"" start= auto *>$null
+    New-Service -Name "sshd" -BinaryPathName "`"$sshdBinPath`"" -DisplayName "OpenSSH SSH Server" -Description "OpenSSH SSH Server for Agentless Telemetry Monitoring" -StartupType Automatic -ErrorAction SilentlyContinue | Out-Null
 }
+# Pastikan path di registry ber-tanda kutip (mencegah System Error 1067 Unquoted Path)
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\sshd" -Name "ImagePath" -Value "`"$sshdBinPath`"" -ErrorAction SilentlyContinue
+Set-Service -Name "sshd" -StartupType Automatic -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$sshDataDir\logs" -ErrorAction SilentlyContinue
 
 # -------------------------------------------------------------------------------
 # 2. Inisialisasi Direktori Data & Host Keys
@@ -122,8 +123,6 @@ PasswordAuthentication yes
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
 Subsystem sftp sftp-server.exe
-Match Group administrators
-       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
 "@
 
 $configFile = "$sshDataDir\sshd_config"
